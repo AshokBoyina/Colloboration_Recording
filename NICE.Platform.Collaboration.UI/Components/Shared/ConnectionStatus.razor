@@ -1,0 +1,24 @@
+@using NICE.Platform.Collaboration.UI.Services
+@using NICE.Platform.Collaboration.UI.Models
+
+<span class="@CssClass">@Label</span>
+
+@code {
+    [Parameter] public HubConnectionState State { get; set; }
+
+    private string Label => State switch
+    {
+        HubConnectionState.Connected    => "● Connected",
+        HubConnectionState.Connecting   => "◌ Connecting…",
+        HubConnectionState.Reconnecting => "↺ Reconnecting…",
+        _                               => "○ Disconnected"
+    };
+
+    private string CssClass => State switch
+    {
+        HubConnectionState.Connected    => "badge-connected",
+        HubConnectionState.Connecting   => "badge-connecting",
+        HubConnectionState.Reconnecting => "badge-connecting",
+        _                               => "badge-disconnected"
+    };
+}

@@ -1,0 +1,384 @@
+@namespace NICE.Platform.Collaboration.Recording
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject Microsoft.Extensions.Options.IOptions<RecordingOptions> OptionsAccessor
+
+@*
+    Embeddable screen-recording control. Drop into any host Blazor page:
+
+        <StandaloneRecorder ApiBaseUrl="https://recording-api.example.com"
+                            ApplicationId="@appGuid"
+                            AccessToken="@userToken"
+                            OnStopped="HandleStopped" />
+
+    Or bind everything from configuration via AddCollaborationRecording(config)
+    and just place <StandaloneRecorder />. Provide ChildContent to fully replace
+    the default UI while still driving the recorder through the cascaded instance.
+*@
+
+@if (ChildContent is not null)
+{
+    @ChildContent(this)
+}
+else
+{
+    <div class="nrec-recorder">
+        <div class="nrec-status nrec-@_state.ToString().ToLowerInvariant()">@StatusText</div>
+        <div class="nrec-actions">
+            <button class="nrec-btn nrec-btn--start"
+                    disabled="@(_state == RecorderState.Recording || _busy)"
+                    @onclick="() => StartAsync()">
+                ● Start recording
+            </button>
+            <button class="nrec-btn nrec-btn--stop"
+                    disabled="@(_state != RecorderState.Recording || _busy)"
+                    @onclick="StopAsync">
+                ■ Stop
+            </button>
+            @if (ChunksSent > 0)
+            {
+                <span class="nrec-meta">@ChunksSent chunks · @(TotalBytes / 1024) KB</span>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    // ── Parameters (override the bound RecordingOptions when set) ──────────────
+    [Parameter] public string? ApiBaseUrl    { get; set; }
+    [Parameter] public string? ApplicationId { get; set; }
+    [Parameter] public string? AccessToken   { get; set; }
+
+    /// <summary>
+    /// Optional name used as the key for the JS bridge, so host scripts can target
+    /// this specific recorder: <c>window.niceScreenRecording.start("thisName")</c>.
+    /// When omitted, the recorder still registers and can be driven with the
+    /// no-argument <c>window.niceScreenRecording.start()</c> (first/only recorder).
+    /// </summary>
+    [Parameter] public string? Name { get; set; }
+
+    /// <summary>Raised once capture begins. Argument is the negotiated MIME type.</summary>
+    [Parameter] public EventCallback<string> OnStarted { get; set; }
+    /// <summary>Raised after the recording is fully finalized on the server.</summary>
+    [Parameter] public EventCallback<RecordingResult> OnStopped { get; set; }
+    /// <summary>Raised after each chunk is uploaded.</summary>
+    [Parameter] public EventCallback<ChunkProgress> OnChunk { get; set; }
+    /// <summary>Raised on any recoverable error (chunk failure, hub error, …).</summary>
+    [Parameter] public EventCallback<string> OnError { get; set; }
+
+    /// <summary>Optional custom UI. Receives this component instance to call StartAsync/StopAsync.</summary>
+    [Parameter] public RenderFragment<StandaloneRecorder>? ChildContent { get; set; }
+
+    public enum RecorderState { Idle, Starting, Recording, Stopping, Error }
+
+    public RecorderState State => _state;
+    public int  ChunksSent { get; private set; }
+    public long TotalBytes { get; private set; }
+    public string? MimeType { get; private set; }
+
+    private RecorderState _state = RecorderState.Idle;
+    private bool          _busy;
+    private string        StatusText = "Ready";
+
+    private readonly string _handle = Guid.NewGuid().ToString("N");
+    private IJSObjectReference?               _module;
+    private DotNetObjectReference<StandaloneRecorder>? _selfRef;
+    private Microsoft.AspNetCore.SignalR.Client.HubConnection? _hub;
+    private string? _recordingId;
+
+    private RecordingOptions Opts => OptionsAccessor.Value;
+    private string EffectiveApiBase => (ApiBaseUrl ?? Opts.ApiBaseUrl).TrimEnd('/');
+    private string EffectiveAppId   => ApplicationId ?? Opts.ApplicationId;
+    // Token precedence: the per-call token passed to StartAsync (user-specific,
+    // supplied at the moment recording starts) ▸ the AccessToken parameter ▸ options.
+    private string EffectiveToken   => _startToken ?? AccessToken ?? Opts.AccessToken ?? string.Empty;
+    private string RegistrationKey  => string.IsNullOrWhiteSpace(Name) ? _handle : Name!;
+
+    // The access token captured for the current recording (passed at start time).
+    private string? _startToken;
+    // Optional caller-supplied collaboration/session id (passed at start time).
+    private string? _collaborationId;
+
+    // ── Live-publish (WebRTC) state ──────────────────────────────────────────
+    private Microsoft.AspNetCore.SignalR.Client.HubConnection? _collabHub;
+    private string? _liveCollabId;    // collaboration id the monitor lists & watches
+    private string? _iceServersJson;  // ICE servers received via IceServersReady
+    private bool    _captureReady;    // the capture stream is acquired (offer can be made)
+    private bool    _pendingOffer;    // ScreenOfferRequested arrived before capture was ready
+
+    // Import the JS module and register this component so host page scripts can
+    // call window.niceScreenRecording.start()/stop() before any .NET interaction.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _selfRef ??= DotNetObjectReference.Create(this);
+        _module  ??= await JS.InvokeAsync<IJSObjectReference>(
+            "import", "./_content/NICE.Platform.Collaboration.Recording/recorder.js");
+        await _module.InvokeVoidAsync("registerComponent", RegistrationKey, _selfRef);
+    }
+
+    /// <summary>
+    /// Connects the recording hub and starts screen capture. Marked [JSInvokable]
+    /// so it can be driven from JavaScript via window.niceScreenRecording.start().
+    /// </summary>
+    [JSInvokable]
+    public async Task StartAsync(string? accessToken = null, string? collaborationId = null)
+    {
+        if (_state is RecorderState.Recording or RecorderState.Starting) return;
+
+        // Capture the per-call, user-specific token (falls back to parameter/options).
+        _startToken = string.IsNullOrWhiteSpace(accessToken) ? null : accessToken;
+        // Optional caller-supplied collaboration/session id; null ⇒ server generates one.
+        _collaborationId = string.IsNullOrWhiteSpace(collaborationId) ? null : collaborationId;
+
+        if (string.IsNullOrWhiteSpace(EffectiveApiBase) || string.IsNullOrWhiteSpace(EffectiveAppId))
+        {
+            await SetError("ApiBaseUrl and ApplicationId must be configured before recording.");
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(EffectiveToken))
+        {
+            await SetError("An access token is required to start recording. " +
+                           "Pass it to start: window.niceScreenRecording.start(userAccessToken).");
+            return;
+        }
+
+        _busy = true;
+        SetState(RecorderState.Starting, "Connecting…");
+        try
+        {
+            _selfRef ??= DotNetObjectReference.Create(this);
+            _module  ??= await JS.InvokeAsync<IJSObjectReference>(
+                "import", "./_content/NICE.Platform.Collaboration.Recording/recorder.js");
+
+            // 1) Acquire the screen NOW — while the user gesture's activation is still valid,
+            //    before the (async) SignalR handshakes run.
+            MimeType      = await _module.InvokeAsync<string>("acquire", _handle);
+            _captureReady = true;
+
+            // 2) Collaboration hub — creates the standalone session the monitor lists and
+            //    carries the live WebRTC signalling.
+            var tok = Uri.EscapeDataString(EffectiveToken);
+            _collabHub = new Microsoft.AspNetCore.SignalR.Client.HubConnectionBuilder()
+                .WithUrl($"{EffectiveApiBase}/hubs/v1/collaboration?access_token={tok}")
+                .WithAutomaticReconnect()
+                .Build();
+
+            _collabHub.On<System.Text.Json.JsonElement>("IceServersReady",
+                cfg => { _iceServersJson = ExtractIceServers(cfg); return Task.CompletedTask; });
+            _collabHub.On<StandaloneSessionDto>("StandaloneSessionStarted",
+                async info => { _liveCollabId = info.CollaborationId; await OnSessionStartedAsync(); });
+            _collabHub.On<string>("ScreenOfferRequested",
+                async _ => await SendOfferAsync());
+            _collabHub.On<AnswerDto>("Answer",
+                async ans => { try { if (_module is not null) await _module.InvokeVoidAsync("setAnswer", _handle, ans.Sdp); } catch { } });
+
+            await _collabHub.StartAsync();
+            // null collaborationId ⇒ server generates one; otherwise reuse the caller's session id.
+            await _collabHub.InvokeAsync("StartStandaloneSession", _collaborationId);
+            // Recording + chunk upload begin in OnSessionStartedAsync (after StandaloneSessionStarted).
+        }
+        catch (Exception ex)
+        {
+            await SetError($"Failed to start recording: {ex.Message}");
+            try { if (_module is not null) await _module.InvokeVoidAsync("stop", _handle); } catch { }
+            await TeardownHubAsync();
+        }
+        finally
+        {
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    // Connects the recording hub (after the standalone session exists) and starts recording.
+    private async Task OnSessionStartedAsync()
+    {
+        try
+        {
+            var tok = Uri.EscapeDataString(EffectiveToken);
+            _hub = new Microsoft.AspNetCore.SignalR.Client.HubConnectionBuilder()
+                .WithUrl($"{EffectiveApiBase}/hubs/v1/recording?access_token={tok}")
+                .WithAutomaticReconnect()
+                .Build();
+
+            _hub.On<RecordingReadyDto>("RecordingReady", async info =>
+            {
+                _recordingId = info.RecordingId;
+                await BeginCaptureAsync();
+            });
+            _hub.On<string>("Error", async msg => await SetError($"Recording hub: {msg}"));
+
+            await _hub.StartAsync();
+            // Tie the recording to the same collaboration the monitor is watching.
+            await _hub.InvokeAsync("StartRecording", EffectiveAppId, _liveCollabId);
+        }
+        catch (Exception ex)
+        {
+            await SetError($"Recording start failed: {ex.Message}");
+        }
+    }
+
+    // Starts MediaRecorder + chunk upload on the already-acquired stream.
+    private async Task BeginCaptureAsync()
+    {
+        try
+        {
+            var chunkUrl = $"{EffectiveApiBase}/api/v1/collaboration/recordings/{_recordingId}/chunks";
+            await _module!.InvokeVoidAsync("beginUpload", _selfRef, new
+            {
+                handle             = _handle,
+                chunkUrl,
+                token              = EffectiveToken,
+                videoBitsPerSecond = Opts.VideoBitsPerSecond,
+                timesliceMs        = Opts.TimesliceMs
+            });
+            SetState(RecorderState.Recording, "Recording…");
+            await OnStarted.InvokeAsync(MimeType ?? string.Empty);
+
+            // If the monitor requested the stream while we were starting, send the offer now.
+            if (_pendingOffer) { _pendingOffer = false; await SendOfferAsync(); }
+        }
+        catch (Exception ex)
+        {
+            await SetError($"Screen capture failed: {ex.Message}");
+        }
+        StateHasChanged();
+    }
+
+    // Creates a WebRTC offer from the capture stream and sends it to the monitor.
+    private async Task SendOfferAsync()
+    {
+        if (_module is null || _collabHub is null || string.IsNullOrEmpty(_liveCollabId)) return;
+        if (!_captureReady) { _pendingOffer = true; return; }   // stream not ready — defer
+        try
+        {
+            var sdp = await _module.InvokeAsync<string>("createOffer", _handle, _iceServersJson ?? "[]");
+            if (!string.IsNullOrEmpty(sdp))
+                await _collabHub.InvokeAsync("ShareScreenOffer", _liveCollabId, sdp);
+        }
+        catch (Exception ex)
+        {
+            await OnError.InvokeAsync($"WebRTC offer failed: {ex.Message}");
+        }
+    }
+
+    private static string ExtractIceServers(System.Text.Json.JsonElement cfg)
+    {
+        if (cfg.ValueKind == System.Text.Json.JsonValueKind.Object)
+            foreach (var name in new[] { "iceServers", "IceServers" })
+                if (cfg.TryGetProperty(name, out var arr) &&
+                    arr.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    return arr.GetRawText();
+        return "[]";
+    }
+
+    /// <summary>
+    /// Stops capture, drains uploads, then finalizes the recording on the server.
+    /// Marked [JSInvokable] so it can be driven from JavaScript via
+    /// window.niceScreenRecording.stop().
+    /// </summary>
+    [JSInvokable]
+    public async Task StopAsync()
+    {
+        if (_state != RecorderState.Recording) return;
+        _busy = true;
+        SetState(RecorderState.Stopping, "Finalizing…");
+        try
+        {
+            // Drain all chunk uploads in JS BEFORE telling the hub to finalize.
+            RecordingResult result = _module is not null
+                ? await _module.InvokeAsync<RecordingResult>("stop", _handle)
+                : new RecordingResult(ChunksSent, TotalBytes);
+
+            if (_hub is not null && _recordingId is not null)
+                await _hub.InvokeAsync("StopRecording", _recordingId);
+
+            // Tear down the live WebRTC session for the monitor.
+            if (_collabHub is not null && !string.IsNullOrEmpty(_liveCollabId))
+            {
+                try { await _collabHub.InvokeAsync("StopScreenShare", _liveCollabId); } catch { }
+                try { await _collabHub.InvokeAsync("EndCollaboration", _liveCollabId, "Completed"); } catch { }
+            }
+
+            SetState(RecorderState.Idle, "Saved.");
+            await OnStopped.InvokeAsync(result);
+        }
+        catch (Exception ex)
+        {
+            await SetError($"Failed to finalize recording: {ex.Message}");
+        }
+        finally
+        {
+            await TeardownHubAsync();
+            _busy = false;
+            StateHasChanged();
+        }
+    }
+
+    // ── JS → .NET callback ─────────────────────────────────────────────────────
+    [JSInvokable]
+    public async Task OnRecorderEvent(string evt, string payload)
+    {
+        switch (evt)
+        {
+            case "chunk":
+                var p = System.Text.Json.JsonSerializer.Deserialize<ChunkProgress>(payload);
+                if (p is not null) { ChunksSent = p.ChunksSent; TotalBytes = p.TotalBytes; await OnChunk.InvokeAsync(p); }
+                break;
+            case "error":
+                await OnError.InvokeAsync(payload);
+                break;
+            case "ended":
+                // User clicked the browser's "Stop sharing" — finalize gracefully.
+                await StopAsync();
+                break;
+        }
+        StateHasChanged();
+    }
+
+    // ── Helpers ─────────────────────────────────────────────────────────────────
+    private void SetState(RecorderState s, string text) { _state = s; StatusText = text; }
+
+    private async Task SetError(string message)
+    {
+        SetState(RecorderState.Error, message);
+        await OnError.InvokeAsync(message);
+        StateHasChanged();
+    }
+
+    private async Task TeardownHubAsync()
+    {
+        if (_hub is not null)
+        {
+            try { await _hub.DisposeAsync(); } catch { /* best effort */ }
+            _hub = null;
+        }
+        if (_collabHub is not null)
+        {
+            try { await _collabHub.DisposeAsync(); } catch { /* best effort */ }
+            _collabHub = null;
+        }
+        _recordingId  = null;
+        _liveCollabId = null;
+        _captureReady = false;
+        _pendingOffer = false;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try { if (_module is not null) await _module.InvokeVoidAsync("unregisterComponent", RegistrationKey); } catch { }
+        try { if (_module is not null) await _module.InvokeVoidAsync("stop", _handle); } catch { }
+        await TeardownHubAsync();
+        if (_module is not null) { try { await _module.DisposeAsync(); } catch { } }
+        _selfRef?.Dispose();
+    }
+
+    // ── DTOs ──────────────────────────────────────────────────────────────────
+    public sealed record RecordingResult(int ChunksSent, long TotalBytes);
+    public sealed record ChunkProgress(int Seq, int ChunksSent, long TotalBytes);
+    private sealed record RecordingReadyDto(string RecordingId, string CollaborationId);
+    private sealed record StandaloneSessionDto(string CollaborationId);
+    private sealed record AnswerDto(string? CollaborationId, string? Sdp);
+}

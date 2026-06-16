@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NICE Standalone Monitor</title>
+  <style>
+    :root {
+      --nice-primary:        #005B41;
+      --nice-primary-strong: #003727;
+      --nice-primary-soft:   #F2F7F5;
+      --nice-error:   #DC3545;
+      --nice-warn:    #FFC107;
+      --nice-success: #198754;
+      --nice-text:        #1a202c;
+      --nice-text-muted:  #6b7280;
+      --nice-border:      #d1d5db;
+      --nice-border-soft: #e5e7eb;
+      --nice-bg:          #ffffff;
+      --nice-bg-soft:     #f5f7fa;
+      --radius-sm:  6px;
+      --radius-md:  10px;
+      --radius-lg:  14px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+      background: var(--nice-bg-soft);
+      color: var(--nice-text);
+      min-height: 100vh;
+      font-size: 14px;
+    }
+
+    /* ── Monitor screen ─────────────────────────────────────── */
+    #monitor-screen { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+
+    /* ── Topbar ─────────────────────────────────────────────── */
+    .nc-topbar {
+      height: 52px;
+      background: var(--nice-primary-strong);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 14px;
+      flex-shrink: 0;
+    }
+    .nc-topbar-brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #fff;
+      font-weight: 600;
+      font-size: .88rem;
+      flex: 1;
+    }
+    .nc-topbar-badge {
+      background: rgba(255,255,255,.2);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: .72rem;
+      font-weight: 600;
+    }
+    .nc-topbar-meta {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: .78rem;
+      color: rgba(255,255,255,.8);
+    }
+    .tag-green {
+      background: rgba(25,135,84,.25);
+      color: #6ee7b7;
+      border: 1px solid rgba(25,135,84,.4);
+      border-radius: 4px; padding: 2px 8px; font-size: .72rem; font-weight: 600;
+    }
+    .tag-red {
+      background: rgba(220,53,69,.25);
+      color: #fca5a5;
+      border: 1px solid rgba(220,53,69,.4);
+      border-radius: 4px; padding: 2px 8px; font-size: .72rem; font-weight: 600;
+    }
+
+    /* ── Body layout ────────────────────────────────────────── */
+    .layout { display: flex; flex: 1; overflow: hidden; }
+
+    /* ── Sidebar ────────────────────────────────────────────── */
+    .sidebar {
+      width: 264px; flex-shrink: 0;
+      background: var(--nice-bg);
+      border-right: 1px solid var(--nice-border-soft);
+      display: flex; flex-direction: column;
+    }
+    .sidebar-header {
+      padding: 14px 16px 10px;
+      border-bottom: 1px solid var(--nice-border-soft);
+    }
+    .sidebar-title {
+      font-size: .7rem; font-weight: 700;
+      letter-spacing: .8px; text-transform: uppercase;
+      color: var(--nice-text-muted); margin-bottom: 8px;
+    }
+    .status-pill {
+      display: flex; align-items: center; gap: 6px;
+      font-size: .78rem; color: var(--nice-text-muted);
+    }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--nice-border); flex-shrink: 0; transition: background 0.3s; }
+    .dot.connecting { background: var(--nice-warn); animation: pulse 1.2s infinite; }
+    .dot.ready      { background: var(--nice-success); }
+    .dot.error      { background: var(--nice-error); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
+
+    .session-list { flex: 1; overflow-y: auto; padding: 8px; }
+    .empty-state {
+      text-align: center; color: var(--nice-text-muted);
+      font-size: .78rem; padding: 28px 12px;
+    }
+    .empty-state svg { opacity: .25; margin: 0 auto 8px; display: block; }
+
+    /* Session cards */
+    .session-card {
+      background: var(--nice-bg);
+      border: 1px solid var(--nice-border-soft);
+      border-radius: var(--radius-md);
+      padding: 11px 12px; margin-bottom: 6px;
+      cursor: pointer; transition: all .15s;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .session-card:hover {
+      background: var(--nice-primary-soft);
+      border-color: var(--nice-primary);
+    }
+    .session-card.active {
+      background: #e6f2ee;
+      border-color: var(--nice-primary);
+      box-shadow: 0 0 0 1px var(--nice-primary);
+    }
+    .sc-avatar {
+      width: 32px; height: 32px; border-radius: 50%;
+      background: var(--nice-primary-strong);
+      color: #fff; font-size: .72rem; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .sc-body { flex: 1; min-width: 0; }
+    .sc-name {
+      font-size: .82rem; font-weight: 600; color: var(--nice-text);
+      display: flex; align-items: center; gap: 5px; margin-bottom: 2px;
+    }
+    .sc-live {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--nice-success); animation: pulse 1.5s infinite;
+      flex-shrink: 0;
+    }
+    .sc-id { font-size: .7rem; color: var(--nice-text-muted); font-family: monospace; }
+    .rec-tag {
+      font-size: .6rem; font-weight: 700;
+      background: rgba(220,53,69,.1); color: var(--nice-error);
+      border: 1px solid rgba(220,53,69,.3);
+      border-radius: 3px; padding: 1px 5px; flex-shrink: 0;
+    }
+
+    /* ── Main area ──────────────────────────────────────────── */
+    .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+    .main-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 18px;
+      background: var(--nice-bg);
+      border-bottom: 1px solid var(--nice-border-soft);
+      flex-shrink: 0;
+    }
+    .watching-label { font-size: .82rem; color: var(--nice-text-muted); }
+    .watching-label strong { color: var(--nice-text); font-weight: 600; }
+
+    .video-wrap {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      padding: 20px; min-height: 0; background: var(--nice-bg-soft);
+    }
+    #remote-video {
+      max-width: 100%; max-height: 100%;
+      border-radius: var(--radius-md);
+      box-shadow: 0 8px 40px rgba(0,55,39,.18);
+      background: #0f172a; display: none;
+    }
+    .no-stream {
+      text-align: center; color: var(--nice-text-muted); font-size: .82rem;
+    }
+    .no-stream svg { opacity: .2; margin: 0 auto 12px; display: block; }
+
+    /* Log */
+    .log {
+      height: 72px; flex-shrink: 0;
+      background: var(--nice-bg);
+      border-top: 1px solid var(--nice-border-soft);
+      padding: 8px 16px; overflow-y: auto;
+      font-size: .7rem; font-family: monospace; color: var(--nice-text-muted);
+    }
+    .log .ok   { color: var(--nice-success); }
+    .log .warn { color: #92400e; }
+    .log .err  { color: var(--nice-error); }
+    .log p { margin-bottom: 2px; }
+  </style>
+</head>
+<body>
+
+<div id="monitor-screen">
+
+  <!-- ── Topbar ───────────────────────────────────────────────── -->
+  <div class="nc-topbar">
+    <div class="nc-topbar-brand">
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;opacity:.9">
+        <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5C21.27 7.61 17 4.5 12 4.5zm0 12.5a5 5 0 110-10 5 5 0 010 10zm0-8a3 3 0 100 6 3 3 0 000-6z" fill="white"/>
+      </svg>
+      NASS Collaboration
+      <span class="nc-topbar-badge">Standalone Monitor</span>
+    </div>
+    <div class="nc-topbar-meta">
+      Live sessions <strong id="session-count" style="color:#fff">0</strong>
+      <span id="conn-tag" class="tag-red">○ Connecting</span>
+    </div>
+  </div>
+
+  <!-- ── Body ─────────────────────────────────────────────────── -->
+  <div class="layout">
+
+    <!-- Sidebar -->
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-title">Active Sessions</div>
+        <div class="status-pill">
+          <div class="dot connecting" id="dot"></div>
+          <span id="status-text">Initialising…</span>
+        </div>
+      </div>
+      <div class="session-list" id="session-list">
+        <div class="empty-state" id="empty-state">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.3">
+            <path d="M15 10l4.553-2.276A1 1 0 0121 8.723v6.554a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
+          </svg>
+          No active sessions.<br/>Sessions appear here as users connect.
+        </div>
+      </div>
+    </div>
+
+    <!-- Main content -->
+    <div class="main">
+      <div class="main-header">
+        <div class="watching-label">Watching: <strong id="watching-name">—</strong></div>
+      </div>
+      <div class="video-wrap">
+        <video id="remote-video" autoplay playsinline></video>
+        <div class="no-stream" id="no-stream">
+          <svg width="52" height="52" viewBox="0 0 24 24" fill="none">
+            <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5C21.27 7.61 17 4.5 12 4.5zm0 12.5a5 5 0 110-10 5 5 0 010 10z" fill="var(--nice-primary)" opacity=".25"/>
+          </svg>
+          <p>Select a session from the sidebar to watch</p>
+        </div>
+      </div>
+      <div class="log" id="log"></div>
+    </div>
+
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// NICE Standalone Monitor — monitor.html
+// Token is always supplied via URL: /monitor.html?token=<jwt>
+// ─────────────────────────────────────────────────────────────────────────────
+const API_BASE = location.origin;
+
+function decodeJwt(t) {
+  try { return JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); }
+  catch { return {}; }
+}
+
+const TOKEN  = new URLSearchParams(location.search).get('token') || '';
+let   APP_ID = '';
+let   collabHub = null, iceServers = [], peerConn = null;
+let   sessions = {}, activeCollabId = null;
+
+const dot          = document.getElementById('dot');
+const statusText   = document.getElementById('status-text');
+const sessionList  = document.getElementById('session-list');
+const emptyState   = document.getElementById('empty-state');
+const remoteVideo  = document.getElementById('remote-video');
+const noStream     = document.getElementById('no-stream');
+const watchingName = document.getElementById('watching-name');
+const connTag      = document.getElementById('conn-tag');
+const sessionCount = document.getElementById('session-count');
+
+function setStatus(t, s) {
+  statusText.textContent = t;
+  dot.className = 'dot ' + s;
+  if (connTag) {
+    if (s === 'ready') {
+      connTag.className = 'tag-green';
+      connTag.textContent = '● Connected';
+    } else if (s === 'connecting') {
+      connTag.className = 'tag-red';
+      connTag.textContent = '○ Connecting';
+    } else {
+      connTag.className = 'tag-red';
+      connTag.textContent = '○ ' + t;
+    }
+  }
+}
+function log(msg, cls = '') {
+  const div = document.getElementById('log');
+  const p   = document.createElement('p');
+  p.className = cls;
+  p.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  div.appendChild(p);
+  div.scrollTop = div.scrollHeight;
+}
+
+// ── Avatar initials helper ────────────────────────────────────────────────────
+function initials(name) {
+  const parts = String(name).trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length-1][0]).toUpperCase();
+  return name.length > 0 ? name[0].toUpperCase() : '?';
+}
+
+// ── Entry point — token must come from URL ?token=… ───────────────────────────
+if (!TOKEN) {
+  setStatus('No token — open as: /monitor.html?token=<jwt>', 'error');
+  log('Token missing. Use BuildMonitorUrlAsync() on the StandaloneRecordingClient to get the full URL.', 'err');
+} else {
+  const claims = decodeJwt(TOKEN);
+  APP_ID = claims['app'] || '';
+
+  if (!APP_ID) {
+    setStatus('Invalid token — missing application claim.', 'error');
+    log('Token has no "app" claim. Mint via POST /api/v1/demo/mint-token?name=...&role=StandaloneMonitor', 'err');
+  } else {
+    setStatus('Connecting…', 'connecting');
+    initMonitor();
+  }
+}
+
+// ── Monitor hub ────────────────────────────────────────────────────────────────
+async function initMonitor() {
+  collabHub = new signalR.HubConnectionBuilder()
+    .withUrl(`${API_BASE}/hubs/v1/collaboration?access_token=${encodeURIComponent(TOKEN)}`)
+    .withAutomaticReconnect()
+    .configureLogging(signalR.LogLevel.Warning)
+    .build();
+
+  collabHub.on('IceServersReady', cfg => {
+    iceServers = cfg.iceServers || cfg.IceServers || [];
+    log(`ICE servers ready (${iceServers.length})`, 'ok');
+  });
+
+  collabHub.on('StandaloneSessionsList', list => {
+    (list || []).forEach(addSession);
+    renderSessions();
+    setStatus(`Connected — ${Object.keys(sessions).length} session(s)`, 'ready');
+    log(`${list ? list.length : 0} active session(s)`, 'ok');
+  });
+
+  collabHub.on('StandaloneSessionStarted', info => {
+    addSession(info); renderSessions();
+    log(`New session: ${info.userName || info.UserName}`, 'ok');
+  });
+
+  collabHub.on('CollaborationEnded', payload => {
+    const id = payload.id || payload.Id;
+    if (sessions[id]) { delete sessions[id]; renderSessions(); log('Session ended', 'warn'); }
+    if (activeCollabId === id) { clearVideo(); activeCollabId = null; watchingName.textContent = '—'; }
+  });
+
+  collabHub.on('Offer', async payload => {
+    const sdp = payload.sdp || payload.Sdp;
+    const cid = payload.collaborationId || payload.CollaborationId;
+    if (cid !== activeCollabId || !sdp) return;
+    log('Offer received — creating answer…');
+    await handleOffer(sdp);
+  });
+
+  collabHub.on('ScreenShareStopped', () => { clearVideo(); log('Screen share stopped', 'warn'); });
+  collabHub.on('ForceDisconnect', msg => { setStatus('Disconnected: ' + msg, 'error'); log(msg, 'err'); });
+
+  collabHub.onreconnecting(() => setStatus('Reconnecting…', 'connecting'));
+  collabHub.onreconnected(async () => {
+    setStatus('Reconnected', 'ready');
+    log('Reconnected', 'ok');
+    await collabHub.invoke('GetStandaloneSessions');
+  });
+  collabHub.onclose(() => setStatus('Disconnected', 'error'));
+
+  try {
+    await collabHub.start();
+    log('CollaborationHub connected', 'ok');
+    await collabHub.invoke('GetStandaloneSessions');
+  } catch (e) {
+    setStatus('Connection failed — is the API running?', 'error');
+    log('Hub error: ' + e, 'err');
+  }
+}
+
+// ── Session list ───────────────────────────────────────────────────────────────
+function addSession(info) {
+  const id = info.collaborationId || info.CollaborationId;
+  if (!id) return;
+  sessions[id] = { collaborationId: id, userName: info.userName || info.UserName || 'Unknown' };
+}
+
+function renderSessions() {
+  const ids = Object.keys(sessions);
+  if (sessionCount) sessionCount.textContent = ids.length;
+  emptyState.style.display = ids.length ? 'none' : 'block';
+  sessionList.querySelectorAll('.session-card').forEach(el => { if (!sessions[el.dataset.id]) el.remove(); });
+  ids.forEach(id => {
+    if (sessionList.querySelector(`[data-id="${id}"]`)) return;
+    const s    = sessions[id];
+    const card = document.createElement('div');
+    card.className  = 'session-card' + (id === activeCollabId ? ' active' : '');
+    card.dataset.id = id;
+    card.innerHTML  = `
+      <div class="sc-avatar">${initials(s.userName)}</div>
+      <div class="sc-body">
+        <div class="sc-name"><div class="sc-live"></div>${esc(s.userName)}</div>
+        <div class="sc-id">${id.slice(0,8)}…</div>
+      </div>
+      <span class="rec-tag">REC</span>`;
+    card.addEventListener('click', () => joinSession(id));
+    sessionList.insertBefore(card, emptyState);
+  });
+  sessionList.querySelectorAll('.session-card').forEach(el =>
+    el.classList.toggle('active', el.dataset.id === activeCollabId));
+}
+
+async function joinSession(id) {
+  if (activeCollabId === id) return;
+  clearVideo();
+  activeCollabId  = id;
+  watchingName.textContent = sessions[id]?.userName || id.slice(0, 8);
+  renderSessions();
+  log(`Joining ${sessions[id]?.userName}…`);
+  try { await collabHub.invoke('JoinStandaloneSession', id); }
+  catch (e) { log('Join error: ' + e, 'err'); }
+}
+
+// ── WebRTC answer ─────────────────────────────────────────────────────────────
+async function handleOffer(sdp) {
+  if (peerConn) peerConn.close();
+  peerConn = new RTCPeerConnection({ iceServers: mapIce() });
+  peerConn.ontrack = e => {
+    remoteVideo.srcObject   = e.streams[0] || new MediaStream([e.track]);
+    remoteVideo.style.display = 'block';
+    noStream.style.display    = 'none';
+    log('Video stream active', 'ok');
+  };
+  peerConn.onicecandidate = () => {};
+  peerConn.onicegatheringstatechange = async () => {
+    if (peerConn.iceGatheringState === 'complete' && activeCollabId) {
+      await collabHub.invoke('ShareScreenAnswer', activeCollabId, peerConn.localDescription.sdp);
+      log('Answer sent', 'ok');
+    }
+  };
+  try {
+    await peerConn.setRemoteDescription({ type: 'offer', sdp });
+    const ans = await peerConn.createAnswer();
+    await peerConn.setLocalDescription(ans);
+  } catch (e) { log('WebRTC error: ' + e, 'err'); }
+}
+
+function clearVideo() {
+  if (peerConn) { peerConn.close(); peerConn = null; }
+  remoteVideo.srcObject     = null;
+  remoteVideo.style.display = 'none';
+  noStream.style.display    = 'flex';
+}
+
+function mapIce() {
+  return iceServers.map(s => ({
+    urls:       s.urls       || s.Urls,
+    username:   s.username   || s.Username   || undefined,
+    credential: s.credential || s.Credential || undefined
+  }));
+}
+
+function esc(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+</script>
+</body>
+</html>

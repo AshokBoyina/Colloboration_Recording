@@ -1,0 +1,161 @@
+@page "/"
+@inject StandaloneRecordingClient Client
+@inject IConfiguration Config
+@inject IJSRuntime JS
+@using System.Text.Json
+
+<PageTitle>Recording customer app</PageTitle>
+
+<h1 style="font-size:1.2rem;margin:0 0 12px">Screen recording (via NuGet package)</h1>
+
+<div style="background:#11182e;border:1px solid #232c47;border-radius:8px;padding:14px 18px;max-width:760px;font-size:.85rem;line-height:1.6">
+    <div><b>API base:</b> @_apiBase</div>
+    <div><b>Application id:</b> @(_appId ?? "(resolving…)")</div>
+    <div><b>Recording as:</b> @(string.IsNullOrWhiteSpace(_pastedToken) ? _userName : "(pasted token)")</div>
+    <div><b>Collaboration id (sent at start):</b> @_collabId</div>
+    <div><b>JS bridge ready:</b> @_ready</div>
+</div>
+
+<div style="margin:14px 0;max-width:760px;display:flex;flex-direction:column;gap:10px">
+    <label style="font-size:.85rem;color:#cdd3e6">
+        Person sharing the screen (the name the monitor shows)
+        <input @bind="_userName" @bind:event="oninput" placeholder="Alice Smith"
+               style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:6px;border:1px solid #39456b;background:#0b1020;color:#e8eaf0" />
+    </label>
+    <label style="font-size:.85rem;color:#8893b5">
+        …or paste a token from <code>/api/v1/demo/mint-token</code> (optional — overrides the name)
+        <input @bind="_pastedToken" @bind:event="oninput" placeholder="eyJ…"
+               style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:6px;border:1px solid #39456b;background:#0b1020;color:#e8eaf0;font-family:monospace;font-size:.75rem" />
+    </label>
+</div>
+
+<div style="display:flex;gap:8px;margin:16px 0;max-width:760px">
+    <button @onclick="StartAsync" disabled="@(!CanStart)"
+            style="padding:9px 18px;border:0;border-radius:6px;background:#1db954;color:#04210f;font-weight:700;cursor:pointer">
+        ● Start recording
+    </button>
+    <button @onclick="StopAsync"
+            style="padding:9px 18px;border:0;border-radius:6px;background:#e0506a;color:#2a0810;font-weight:700;cursor:pointer">
+        ■ Stop
+    </button>
+    <button @onclick="NewCollabId"
+            style="padding:9px 18px;border:1px solid #39456b;border-radius:6px;background:transparent;color:#cdd3e6;cursor:pointer">
+        New collaboration id
+    </button>
+</div>
+
+@* The package component. Empty ChildContent hides its default UI; we drive it via
+   the window.niceScreenRecording JS global to exercise the real customer call path. *@
+<StandaloneRecorder Name="customer" ApiBaseUrl="@_apiBase" ApplicationId="@_appId"
+                    OnStarted="HandleStarted" OnChunk="HandleChunk"
+                    OnStopped="HandleStopped" OnError="HandleError">
+    <text></text>
+</StandaloneRecorder>
+
+<h4 style="margin:18px 0 6px">Log</h4>
+<pre style="background:#05070f;border:1px solid #232c47;border-radius:8px;padding:12px;height:240px;overflow:auto;font-size:.8rem;max-width:760px;color:#8fe3a6">@_log</pre>
+
+@code {
+    private string  _apiBase = "";
+    private string? _appId;
+    private string  _userName = "Recording User";
+    private string  _pastedToken = "";
+    private string  _collabId = Guid.NewGuid().ToString();
+    private bool    _ready;
+    private string  _log = "";
+
+    private bool CanStart => !string.IsNullOrEmpty(_appId);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var cfg = Config.GetSection(StandaloneRecordingConfig.SectionName);
+        _apiBase  = (cfg["ApiBaseUrl"] ?? "").TrimEnd('/');
+        _userName = string.IsNullOrWhiteSpace(cfg["UserName"]) ? "Recording User" : cfg["UserName"]!;
+        try
+        {
+            // Mint a token once just to resolve the application id (same for every user).
+            var token = await Client.GetOrMintTokenAsync(name: _userName, role: "StandAlone");
+            _appId = JwtClaim(token, "app");
+            Log($"ready — application id = {_appId}");
+        }
+        catch (Exception ex)
+        {
+            Log($"Failed to resolve application id: {ex.Message}");
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try { _ready = await JS.InvokeAsync<bool>("niceScreenRecording.isReady", "customer"); }
+        catch { _ready = false; }
+        StateHasChanged();
+    }
+
+    private async Task StartAsync()
+    {
+        try
+        {
+            // Resolve the token whose name the monitor will display:
+            //   • a pasted /demo/mint-token token wins, else
+            //   • mint one for the entered person's name.
+            string token;
+            if (!string.IsNullOrWhiteSpace(_pastedToken))
+            {
+                token = _pastedToken.Trim();
+                var who = $"{JwtClaim(token, "given_name")} {JwtClaim(token, "family_name")}".Trim();
+                Log($"using pasted token{(string.IsNullOrWhiteSpace(who) ? "" : $" for {who}")}");
+            }
+            else
+            {
+                token = await Client.GetOrMintTokenAsync(name: _userName, role: "StandAlone");
+                Log($"minted token for '{_userName}'");
+            }
+            _appId ??= JwtClaim(token, "app");
+
+            await JS.InvokeVoidAsync("niceScreenRecording.start",
+                new { token, collaborationId = _collabId, name = "customer" });
+        }
+        catch (Exception ex) { Log($"start() threw: {ex.Message}"); }
+    }
+
+    private async Task StopAsync()
+    {
+        try { await JS.InvokeVoidAsync("niceScreenRecording.stop", "customer"); }
+        catch (Exception ex) { Log($"stop() threw: {ex.Message}"); }
+    }
+
+    private void NewCollabId()
+    {
+        _collabId = Guid.NewGuid().ToString();
+        Log($"new collaborationId: {_collabId}");
+    }
+
+    private void HandleStarted(string mime) => Log($"started — mime: {mime}");
+    private void HandleChunk(StandaloneRecorder.ChunkProgress c)
+        => Log($"chunk #{c.Seq} — {c.ChunksSent} sent, {c.TotalBytes / 1024} KB");
+    private void HandleStopped(StandaloneRecorder.RecordingResult r)
+        => Log($"stopped — {r.ChunksSent} chunks, {r.TotalBytes / 1024} KB. File is in the API's RecordingsPath.");
+    private void HandleError(string err) => Log($"ERROR: {err}");
+
+    private void Log(string msg)
+    {
+        _log = $"[{DateTime.Now:HH:mm:ss}] {msg}\n" + _log;
+        StateHasChanged();
+    }
+
+    private static string? JwtClaim(string jwt, string name)
+    {
+        try
+        {
+            var parts = jwt.Split('.');
+            if (parts.Length < 2) return null;
+            var s = parts[1].Replace('-', '+').Replace('_', '/');
+            s = s.PadRight(s.Length + (4 - s.Length % 4) % 4, '=');
+            var json = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(s));
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.TryGetProperty(name, out var e) ? e.GetString() : null;
+        }
+        catch { return null; }
+    }
+}

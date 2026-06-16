@@ -1,0 +1,32 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject IAuthService Auth
+
+@* Full-screen pages (AgentDashboard, SupervisorView) manage their own
+   topbar and layout — they must NOT inherit the MainLayout chrome.
+   We still gate rendering until the session is restored from localStorage
+   so a page refresh does not falsely redirect to /login. *@
+@if (_sessionRestored)
+{
+    @Body
+}
+else
+{
+    <!-- Blank while localStorage restore is in flight (< 1 render frame) -->
+}
+
+@code {
+    bool _sessionRestored = false;
+
+    protected override void OnInitialized() => Auth.OnChange += StateHasChanged;
+    public void Dispose()                   => Auth.OnChange -= StateHasChanged;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!Auth.Current.IsAuthenticated)
+            await Auth.TryRestoreAsync();
+        _sessionRestored = true;
+        StateHasChanged();
+    }
+}

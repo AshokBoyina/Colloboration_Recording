@@ -1,0 +1,58 @@
+
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.8.0.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NICE.Platform.Collaboration.Core", "NICE.Platform.Collaboration.Core\NICE.Platform.Collaboration.Core.csproj", "{13B20741-B706-42DA-950A-5B1BF4CDDC96}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NICE.Platform.Collaboration.Application", "NICE.Platform.Collaboration.Application\NICE.Platform.Collaboration.Application.csproj", "{978104C4-5B35-4902-9A82-CDDC4FEE7BFA}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NICE.Platform.Collaboration.Infrastructure", "NICE.Platform.Collaboration.Infrastructure\NICE.Platform.Collaboration.Infrastructure.csproj", "{11CAA61E-83E0-4B36-90A4-DBF94A6B0FCE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NICE.Platform.Collaboration.API", "NICE.Platform.Collaboration.API\NICE.Platform.Collaboration.API.csproj", "{2E2627DC-869D-47A9-9F60-AF3718E2645A}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NICE.Platform.StandaloneRecording.Client", "NICE.Platform.StandaloneRecording.Client\NICE.Platform.StandaloneRecording.Client.csproj", "{08B65139-D2F5-4D00-AE72-6EF5350B4711}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NICE.Platform.Collaboration.UI", "NICE.Platform.Collaboration.UI\NICE.Platform.Collaboration.UI.csproj", "{25337E99-5986-43D9-9611-4A1CF05C8225}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "NICE.Platform.Collaboration.Recording", "NICE.Platform.Collaboration.Recording\NICE.Platform.Collaboration.Recording.csproj", "{3E182378-E21C-4516-AFAB-1CD7BA0062DE}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{13B20741-B706-42DA-950A-5B1BF4CDDC96}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{13B20741-B706-42DA-950A-5B1BF4CDDC96}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{13B20741-B706-42DA-950A-5B1BF4CDDC96}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{13B20741-B706-42DA-950A-5B1BF4CDDC96}.Release|Any CPU.Build.0 = Release|Any CPU
+		{978104C4-5B35-4902-9A82-CDDC4FEE7BFA}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{978104C4-5B35-4902-9A82-CDDC4FEE7BFA}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{978104C4-5B35-4902-9A82-CDDC4FEE7BFA}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{978104C4-5B35-4902-9A82-CDDC4FEE7BFA}.Release|Any CPU.Build.0 = Release|Any CPU
+		{11CAA61E-83E0-4B36-90A4-DBF94A6B0FCE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{11CAA61E-83E0-4B36-90A4-DBF94A6B0FCE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{11CAA61E-83E0-4B36-90A4-DBF94A6B0FCE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{11CAA61E-83E0-4B36-90A4-DBF94A6B0FCE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2E2627DC-869D-47A9-9F60-AF3718E2645A}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2E2627DC-869D-47A9-9F60-AF3718E2645A}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2E2627DC-869D-47A9-9F60-AF3718E2645A}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2E2627DC-869D-47A9-9F60-AF3718E2645A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{08B65139-D2F5-4D00-AE72-6EF5350B4711}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{08B65139-D2F5-4D00-AE72-6EF5350B4711}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{08B65139-D2F5-4D00-AE72-6EF5350B4711}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{08B65139-D2F5-4D00-AE72-6EF5350B4711}.Release|Any CPU.Build.0 = Release|Any CPU
+		{25337E99-5986-43D9-9611-4A1CF05C8225}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{25337E99-5986-43D9-9611-4A1CF05C8225}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{25337E99-5986-43D9-9611-4A1CF05C8225}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{25337E99-5986-43D9-9611-4A1CF05C8225}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3E182378-E21C-4516-AFAB-1CD7BA0062DE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3E182378-E21C-4516-AFAB-1CD7BA0062DE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3E182378-E21C-4516-AFAB-1CD7BA0062DE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3E182378-E21C-4516-AFAB-1CD7BA0062DE}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

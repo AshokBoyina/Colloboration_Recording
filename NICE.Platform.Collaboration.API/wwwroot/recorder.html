@@ -1,0 +1,651 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NICE Standalone Recorder</title>
+  <style>
+    :root {
+      --nice-primary:        #005B41;
+      --nice-primary-strong: #003727;
+      --nice-primary-soft:   #F2F7F5;
+      --nice-error:   #DC3545;
+      --nice-warn:    #FFC107;
+      --nice-success: #198754;
+      --nice-text:        #1a202c;
+      --nice-text-muted:  #6b7280;
+      --nice-border:      #d1d5db;
+      --nice-border-soft: #e5e7eb;
+      --nice-bg:          #ffffff;
+      --nice-bg-soft:     #f5f7fa;
+      --radius-sm:  6px;
+      --radius-md:  10px;
+      --radius-lg:  14px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+      background: var(--nice-bg-soft);
+      color: var(--nice-text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      font-size: 14px;
+    }
+
+    /* ── Topbar ─────────────────────────────────────────────── */
+    .nc-topbar {
+      height: 52px;
+      background: var(--nice-primary-strong);
+      display: flex;
+      align-items: center;
+      padding: 0 20px;
+      gap: 12px;
+      flex-shrink: 0;
+    }
+    .nc-topbar-brand {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: #fff;
+      font-weight: 600;
+      font-size: .88rem;
+      flex: 1;
+    }
+    .nc-topbar-badge {
+      background: rgba(255,255,255,.2);
+      border-radius: 4px;
+      padding: 2px 8px;
+      font-size: .72rem;
+      font-weight: 600;
+    }
+    .nc-topbar-status {
+      font-size: .78rem;
+      color: rgba(255,255,255,.8);
+    }
+
+    /* ── Page body ──────────────────────────────────────────── */
+    .page-body {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 24px;
+    }
+
+    /* ── Card ───────────────────────────────────────────────── */
+    .card {
+      background: var(--nice-bg);
+      border-radius: var(--radius-lg);
+      box-shadow: 0 8px 40px rgba(0,55,39,.12);
+      padding: 36px 40px;
+      width: 100%;
+      max-width: 540px;
+    }
+
+    /* ── User info ──────────────────────────────────────────── */
+    .user-info {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 24px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--nice-border-soft);
+      text-align: left;
+    }
+    .user-avatar {
+      width: 44px; height: 44px;
+      background: var(--nice-primary-strong);
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1rem; font-weight: 700; color: #fff;
+      flex-shrink: 0;
+    }
+    .user-name { font-weight: 700; color: var(--nice-text); font-size: .95rem; }
+    .user-role { font-size: .75rem; color: var(--nice-text-muted); margin-top: 2px; }
+
+    h2 { font-size: 1.1rem; font-weight: 700; color: var(--nice-text); margin-bottom: 4px; }
+    .subtitle { font-size: .82rem; color: var(--nice-text-muted); margin-bottom: 18px; }
+
+    /* ── Status row ─────────────────────────────────────────── */
+    .status-row {
+      display: flex; align-items: center; gap: 8px;
+      background: var(--nice-bg-soft);
+      border: 1px solid var(--nice-border-soft);
+      border-radius: var(--radius-sm);
+      padding: 10px 14px; margin-bottom: 18px;
+      font-size: .82rem; color: var(--nice-text-muted); min-height: 42px;
+    }
+    .dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--nice-border); flex-shrink: 0; transition: background 0.3s;
+    }
+    .dot.connecting { background: var(--nice-warn); animation: pulse 1.2s infinite; }
+    .dot.ready      { background: var(--nice-success); }
+    .dot.recording  { background: var(--nice-error); animation: pulse 1s infinite; }
+    .dot.error      { background: var(--nice-error); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.35} }
+
+    /* ── Video preview ──────────────────────────────────────── */
+    .preview-wrap {
+      position: relative;
+      background: #0f172a;
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      margin-bottom: 16px;
+      aspect-ratio: 16/9;
+      border: 1px solid var(--nice-border-soft);
+    }
+    #preview { width: 100%; height: 100%; object-fit: contain; display: block; }
+    .preview-off {
+      position: absolute; inset: 0;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      color: rgba(255,255,255,.3); font-size: .82rem; gap: 8px;
+    }
+    #preview-placeholder { display: flex; }
+    .badge {
+      position: absolute; top: 10px; left: 10px;
+      background: rgba(220,53,69,.9); color: #fff;
+      font-size: .68rem; font-weight: 700; letter-spacing: .5px;
+      padding: 3px 8px; border-radius: 4px; display: none;
+    }
+    .badge.visible { display: block; }
+    .timer {
+      position: absolute; top: 10px; right: 10px;
+      background: rgba(0,0,0,.7); color: #fff;
+      font-size: .78rem; font-family: monospace;
+      padding: 3px 10px; border-radius: 4px; display: none;
+    }
+    .timer.visible { display: block; }
+    .meta { font-size: .75rem; color: var(--nice-text-muted); margin-bottom: 16px; }
+
+    /* ── Buttons ────────────────────────────────────────────── */
+    .btn-row { display: flex; gap: 10px; }
+    button {
+      flex: 1; padding: 11px 18px;
+      border: none; border-radius: var(--radius-sm);
+      font-size: .88rem; font-weight: 600; cursor: pointer;
+      transition: all .18s;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-primary {
+      background: var(--nice-primary); color: #fff;
+    }
+    .btn-primary:hover:not(:disabled) {
+      background: var(--nice-primary-strong);
+    }
+    .btn-secondary {
+      background: #fff; color: var(--nice-error);
+      border: 1.5px solid var(--nice-error);
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background: var(--nice-error); color: #fff;
+    }
+
+    /* ── Chunk info + log ───────────────────────────────────── */
+    .chunk-info {
+      font-size: .72rem; color: var(--nice-text-muted);
+      margin-top: 8px; text-align: right;
+    }
+    .log {
+      margin-top: 14px;
+      background: var(--nice-bg-soft);
+      border: 1px solid var(--nice-border-soft);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px; font-size: .7rem; font-family: monospace;
+      color: var(--nice-text-muted); max-height: 90px; overflow-y: auto;
+    }
+    .log .ok   { color: var(--nice-success); }
+    .log .warn { color: #92400e; }
+    .log .err  { color: var(--nice-error); }
+    .log p { margin-bottom: 2px; }
+  </style>
+</head>
+<body>
+
+<!-- ── Topbar ──────────────────────────────────────────────────── -->
+<div class="nc-topbar">
+  <div class="nc-topbar-brand">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;opacity:.9">
+      <circle cx="12" cy="12" r="9" stroke="white" stroke-width="1.8"/>
+      <circle cx="12" cy="12" r="4" fill="white"/>
+    </svg>
+    NASS Collaboration
+    <span class="nc-topbar-badge">Standalone Recorder</span>
+  </div>
+  <span class="nc-topbar-status" id="topbar-status"></span>
+</div>
+
+<!-- ── Centred card ────────────────────────────────────────────── -->
+<div class="page-body">
+  <div class="card">
+
+    <!-- User info -->
+    <div class="user-info">
+      <div class="user-avatar" id="user-avatar">ST</div>
+      <div>
+        <div class="user-name" id="user-name">NICE Platform</div>
+        <div class="user-role">Standalone Screen Recorder</div>
+      </div>
+    </div>
+
+    <h2>Screen Recording</h2>
+    <p class="subtitle" id="rec-subtitle">Capture and stream your screen in real time.</p>
+
+    <div class="status-row">
+      <div class="dot connecting" id="dot"></div>
+      <span id="status-text">Initialising…</span>
+    </div>
+
+    <div class="preview-wrap">
+      <video id="preview" muted autoplay playsinline></video>
+      <div class="preview-off" id="preview-placeholder">
+        <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M15 10l4.553-2.276A1 1 0 0121 8.723v6.554a1 1 0 01-1.447.894L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z"/>
+        </svg>
+        Share your screen to begin
+      </div>
+      <div class="badge" id="rec-badge">● REC</div>
+      <div class="timer" id="timer">00:00</div>
+    </div>
+
+    <div class="meta">Session: <span id="meta-id">—</span></div>
+
+    <div class="btn-row">
+      <button class="btn-primary"   id="btn-start" disabled>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><circle cx="12" cy="12" r="8"/></svg>
+        Start Recording
+      </button>
+      <button class="btn-secondary" id="btn-stop"  disabled>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2"/></svg>
+        Stop
+      </button>
+    </div>
+
+    <div class="chunk-info" id="chunk-info"></div>
+    <div class="log" id="log"></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/8.0.7/signalr.min.js"
+        crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+<script>
+// ─────────────────────────────────────────────────────────────────────────────
+// NICE Standalone Recorder — recorder.html
+// Token is always supplied via URL: /recorder.html?token=<jwt>[&sessionId=<guid>]
+// ─────────────────────────────────────────────────────────────────────────────
+const API_BASE = location.origin;
+
+// ── Host bridge (WebView2 / parent window) ────────────────────────────────────
+function postToHost(type, data = {}) {
+  const msg = JSON.stringify({ type, timestamp: new Date().toISOString(), ...data });
+  try { window.chrome?.webview?.postMessage(msg); } catch {}
+  try { window.parent?.postMessage(msg, '*');      } catch {}
+}
+
+// ── Public API callable from C# via ExecuteScriptAsync ───────────────────────
+window.niceRecorder = {
+  start:  () => { if (!btnStart.disabled) btnStart.click(); },
+  stop:   () => stopRecording(true),
+  state:  () => ({
+    ready:          !btnStart.disabled,
+    recording:      mediaRecorder ? mediaRecorder.state === 'recording' : false,
+    sessionId:      collaborationId,
+    recordingId,
+    chunksSent,
+    totalBytes,
+    elapsedSeconds: timerSecs
+  })
+};
+
+// ── JWT decode ────────────────────────────────────────────────────────────────
+function decodeJwt(t) {
+  try { return JSON.parse(atob(t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/'))); }
+  catch { return {}; }
+}
+
+// ── Read URL params ───────────────────────────────────────────────────────────
+const _params    = new URLSearchParams(location.search);
+const TOKEN      = _params.get('token')     || '';
+const SESSION_ID = _params.get('sessionId') || '';   // optional host-supplied collaboration ID
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let APP_ID = '', USER_NAME = '';
+let collabHub, recHub;
+let collaborationId = null, recordingId = null;
+let iceServers = [], peerConn = null;
+let mediaStream = null, mediaRecorder = null;
+let chunkSeq = 0, chunksSent = 0, totalBytes = 0;
+let timerInterval = null, timerSecs = 0;
+
+// ── DOM refs ──────────────────────────────────────────────────────────────────
+const dot         = document.getElementById('dot');
+const statusText  = document.getElementById('status-text');
+const metaId      = document.getElementById('meta-id');
+const preview     = document.getElementById('preview');
+const placeholder = document.getElementById('preview-placeholder');
+const badge       = document.getElementById('rec-badge');
+const timerEl     = document.getElementById('timer');
+const btnStart    = document.getElementById('btn-start');
+const btnStop     = document.getElementById('btn-stop');
+const chunkInfo   = document.getElementById('chunk-info');
+
+function setStatus(text, state) {
+  statusText.textContent = text;
+  dot.className = 'dot ' + state;
+  const tb = document.getElementById('topbar-status');
+  if (tb) tb.textContent = text;
+}
+function log(msg, cls = '') {
+  const div = document.getElementById('log');
+  const p = document.createElement('p');
+  p.className = cls;
+  p.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  div.appendChild(p);
+  div.scrollTop = div.scrollHeight;
+}
+
+// ── Initials helper ───────────────────────────────────────────────────────────
+function initials(name) {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) return (parts[0][0] + parts[parts.length-1][0]).toUpperCase();
+  return name.length > 0 ? name[0].toUpperCase() : 'ST';
+}
+
+// ── Entry point ───────────────────────────────────────────────────────────────
+if (!TOKEN) {
+  setStatus('No token — open as: /recorder.html?token=<jwt>', 'error');
+  log('Token missing. Host app should call BuildRecorderUrlAsync() to get the full URL.', 'err');
+  postToHost('error', { message: 'No token provided in URL.' });
+} else {
+  const claims = decodeJwt(TOKEN);
+  APP_ID    = claims['app']  || '';
+  USER_NAME = [claims['given_name'], claims['family_name']].filter(Boolean).join(' ')
+              || claims['sub'] || 'Recorder';
+
+  // Update user info panel
+  const avatarEl = document.getElementById('user-avatar');
+  const nameEl   = document.getElementById('user-name');
+  if (avatarEl) avatarEl.textContent = initials(USER_NAME);
+  if (nameEl)   nameEl.textContent   = USER_NAME;
+
+  if (!APP_ID) {
+    setStatus('Invalid token — missing application claim.', 'error');
+    log('Token has no "app" claim. Mint via POST /api/v1/demo/mint-token?name=...&role=StandAlone', 'err');
+    postToHost('error', { message: 'Token missing "app" claim.' });
+  } else {
+    document.getElementById('rec-subtitle').textContent =
+      `Signed in as ${USER_NAME} · Capture and stream your screen.`;
+    setStatus('Connecting…', 'connecting');
+    init();
+  }
+}
+
+// ── Hub initialisation ────────────────────────────────────────────────────────
+async function init() {
+  log(`Connecting as ${USER_NAME}…`);
+
+  collabHub = new signalR.HubConnectionBuilder()
+    .withUrl(`${API_BASE}/hubs/v1/collaboration?access_token=${encodeURIComponent(TOKEN)}`)
+    .withAutomaticReconnect()
+    .configureLogging(signalR.LogLevel.Warning)
+    .build();
+
+  collabHub.on('IceServersReady', cfg => {
+    iceServers = cfg.iceServers || cfg.IceServers || [];
+    log(`ICE servers ready (${iceServers.length})`, 'ok');
+  });
+
+  collabHub.on('ForceDisconnect', msg => {
+    setStatus('Disconnected: ' + msg, 'error');
+    postToHost('error', { message: msg });
+  });
+
+  collabHub.on('Error', msg => {
+    log(`Hub error: ${msg}`, 'err');
+    postToHost('error', { message: msg });
+  });
+
+  collabHub.on('StandaloneSessionStarted', info => {
+    collaborationId = info.collaborationId || info.CollaborationId;
+    metaId.textContent = collaborationId.slice(0,8) + '…';
+    log(`Session started: ${collaborationId.slice(0,8)}`, 'ok');
+    postToHost('session-ready', { sessionId: collaborationId, userName: USER_NAME });
+    connectRecordingHub();
+  });
+
+  collabHub.on('ScreenOfferRequested', async () => {
+    log('Monitor joined — sending WebRTC offer…');
+    if (mediaStream) await setupPeerConnection();
+  });
+
+  collabHub.on('Answer', async payload => {
+    const sdp = payload.sdp || payload.Sdp;
+    if (!peerConn || !sdp) return;
+    try {
+      await peerConn.setRemoteDescription({ type: 'answer', sdp });
+      log('WebRTC answer — stream active', 'ok');
+    } catch (e) { log(`Answer error: ${e}`, 'err'); }
+  });
+
+  collabHub.on('CollaborationEnded', () => stopRecording(false));
+
+  collabHub.onreconnecting(() => setStatus('Reconnecting…', 'connecting'));
+  collabHub.onreconnected(() => { setStatus('Reconnected', 'ready'); log('Reconnected', 'ok'); });
+  collabHub.onclose(() => setStatus('Disconnected', 'error'));
+
+  try {
+    await collabHub.start();
+    log('CollaborationHub connected', 'ok');
+    // Pass SESSION_ID so server uses the host app's own ID (or null to auto-generate).
+    await collabHub.invoke('StartStandaloneSession', SESSION_ID || null);
+  } catch (e) {
+    setStatus('Connection failed — is the API running?', 'error');
+    log(`Hub error: ${e}`, 'err');
+    postToHost('error', { message: String(e) });
+  }
+}
+
+async function connectRecordingHub() {
+  recHub = new signalR.HubConnectionBuilder()
+    .withUrl(`${API_BASE}/hubs/v1/recording?access_token=${encodeURIComponent(TOKEN)}`)
+    .withAutomaticReconnect()
+    .configureLogging(signalR.LogLevel.Warning)
+    .build();
+
+  recHub.on('RecordingReady', info => {
+    recordingId = info.RecordingId || info.recordingId;
+    log(`Recording ready: ${recordingId.slice(0,8)}`, 'ok');
+    setStatus('Ready — click Start Recording', 'ready');
+    btnStart.disabled = false;
+    postToHost('recorder-ready', { sessionId: collaborationId, recordingId });
+  });
+
+  recHub.on('Error', msg => { log(`RecHub: ${msg}`, 'err'); postToHost('error', { message: msg }); });
+
+  try {
+    await recHub.start();
+    log('RecordingHub connected', 'ok');
+    await recHub.invoke('StartRecording', APP_ID);
+  } catch (e) {
+    log(`RecordingHub error: ${e}`, 'err');
+  }
+}
+
+// ── Start / stop buttons ──────────────────────────────────────────────────────
+btnStart.addEventListener('click', async () => {
+  btnStart.disabled = true;
+  try {
+    mediaStream = await navigator.mediaDevices.getDisplayMedia({
+      video: { frameRate: 15, cursor: 'always' }, audio: true
+    });
+    preview.srcObject = mediaStream;
+    placeholder.style.display = 'none';
+
+    await setupPeerConnection();
+    startMediaRecorder();
+
+    badge.classList.add('visible');
+    startTimer();
+    btnStop.disabled = false;
+    setStatus('Recording…', 'recording');
+    log('Recording started', 'ok');
+    postToHost('recording-started', { sessionId: collaborationId, recordingId });
+
+    mediaStream.getVideoTracks()[0].addEventListener('ended', () => stopRecording(true));
+  } catch (e) {
+    btnStart.disabled = false;
+    const msg = e.name === 'NotAllowedError' ? 'Screen share permission denied.' : String(e);
+    log(msg, 'err');
+    setStatus('Failed to start — ' + msg, 'error');
+    postToHost('error', { message: msg });
+  }
+});
+
+btnStop.addEventListener('click', () => stopRecording(true));
+
+// ── WebRTC ────────────────────────────────────────────────────────────────────
+async function setupPeerConnection() {
+  if (peerConn) peerConn.close();
+  peerConn = new RTCPeerConnection({ iceServers: mapIceServers() });
+  mediaStream.getTracks().forEach(t => peerConn.addTrack(t, mediaStream));
+  peerConn.onicecandidate = () => {};
+  peerConn.onicegatheringstatechange = async () => {
+    if (peerConn.iceGatheringState === 'complete' && collaborationId) {
+      await collabHub.invoke('ShareScreenOffer', collaborationId, peerConn.localDescription.sdp);
+      log('Screen offer sent', 'ok');
+    }
+  };
+  const offer = await peerConn.createOffer();
+  await peerConn.setLocalDescription(offer);
+}
+
+// ── MediaRecorder / chunk upload ──────────────────────────────────────────────
+// Prefer fragmented MP4 (seekable by design). Falls back to WebM if the browser
+// does not support video/mp4 in MediaRecorder (e.g. Firefox).
+let recordingMimeType = '';
+
+// Every in-flight chunk upload. stopRecording() must await these before asking
+// the hub to finalize, otherwise the final fragment (emitted during stop()) can
+// reach the server after the file stream is already closed and be dropped —
+// which for a short clip leaves only the init segment and an unplayable file.
+let pendingUploads = [];
+
+function startMediaRecorder() {
+  recordingMimeType = [
+    'video/mp4;codecs=avc1,mp4a.40.2',  // Chrome / WebView2 preferred
+    'video/mp4',                          // Chrome / Edge generic
+    'video/webm;codecs=vp9,opus',        // Firefox fallback
+    'video/webm;codecs=vp8,opus',
+    'video/webm'
+  ].find(m => MediaRecorder.isTypeSupported(m)) || '';
+
+  log(`MediaRecorder format: ${recordingMimeType || '(browser default)'}`, 'ok');
+
+  mediaRecorder = new MediaRecorder(mediaStream, {
+    mimeType: recordingMimeType,
+    videoBitsPerSecond: 2_000_000
+  });
+  chunkSeq = chunksSent = totalBytes = 0;
+  pendingUploads = [];
+  // Keep the upload promise so stopRecording() can wait for it. The handler must
+  // NOT be relied on via onstop alone: the last dataavailable fires synchronously
+  // during stop(), but its upload is async and would still be in flight when the
+  // recording is finalized.
+  mediaRecorder.ondataavailable = e => {
+    if (e.data?.size > 0) pendingUploads.push(uploadChunk(e.data));
+  };
+  mediaRecorder.start(2000);
+}
+
+async function uploadChunk(blob) {
+  if (!recordingId) return;
+  const seq = chunkSeq++;
+  // Send the actual MIME type so the server can serve the file with the correct
+  // Content-Type header and choose the right file extension if needed.
+  const uploadMime = recordingMimeType || 'video/mp4';
+  try {
+    const r = await fetch(`${API_BASE}/api/v1/collaboration/recordings/${recordingId}/chunks`, {
+      method: 'POST',
+      headers: {
+        'Content-Type':        uploadMime,
+        'Authorization':       `Bearer ${TOKEN}`,
+        'X-Chunk-Sequence':    String(seq),
+        'X-Recording-MimeType': uploadMime
+      },
+      body: blob
+    });
+    if (r.ok) {
+      chunksSent++; totalBytes += blob.size;
+      chunkInfo.textContent = `Chunks: ${chunksSent}  |  ${(totalBytes/1024).toFixed(0)} KB uploaded`;
+      postToHost('chunk-uploaded', { seq, chunksSent, totalBytes, recordingId });
+    } else {
+      log(`Chunk ${seq} failed (${r.status})`, 'warn');
+      postToHost('error', { message: `Chunk ${seq} upload failed (HTTP ${r.status})` });
+    }
+  } catch (e) { log(`Chunk ${seq} error: ${e}`, 'err'); }
+}
+
+// ── Stop recording ────────────────────────────────────────────────────────────
+async function stopRecording(userInitiated = true) {
+  if (!mediaStream) return;
+  log(userInitiated ? 'Stopping…' : 'Stopped by server.', 'warn');
+  setStatus('Stopping…', 'connecting');
+  btnStop.disabled = btnStart.disabled = true;
+  stopTimer();
+  badge.classList.remove('visible');
+
+  if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+    await new Promise(r => { mediaRecorder.onstop = r; mediaRecorder.stop(); });
+  }
+
+  // Drain every chunk upload (including the final fragment flushed by stop())
+  // BEFORE the hub finalizes and closes the server-side file. Without this the
+  // trailing fragment is dropped and short clips end up as an init-only file.
+  if (pendingUploads.length) {
+    log(`Flushing ${pendingUploads.length} pending chunk upload(s)…`, 'warn');
+    await Promise.allSettled(pendingUploads);
+    pendingUploads = [];
+  }
+
+  mediaStream.getTracks().forEach(t => t.stop());
+  preview.srcObject = null;
+  placeholder.style.display = 'flex';
+  mediaStream = null;
+  if (peerConn) { peerConn.close(); peerConn = null; }
+
+  try {
+    if (recHub && recordingId)        await recHub.invoke('StopRecording', recordingId);
+    if (collabHub && collaborationId) {
+      await collabHub.invoke('StopScreenShare', collaborationId);
+      await collabHub.invoke('EndCollaboration', collaborationId, 'Completed');
+    }
+    setStatus('Recording saved.', 'ready');
+    log(`Done — ${chunksSent} chunks, ${(totalBytes/1024).toFixed(0)} KB`, 'ok');
+    postToHost('recording-stopped', { sessionId: collaborationId, recordingId, chunksSent, totalBytes, durationSeconds: timerSecs });
+  } catch (e) {
+    log(`Stop error: ${e}`, 'err');
+    setStatus('Saved (with warnings).', 'ready');
+    postToHost('recording-stopped', { sessionId: collaborationId, recordingId, chunksSent, totalBytes, durationSeconds: timerSecs, warning: String(e) });
+  }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function startTimer() {
+  timerSecs = 0; timerEl.classList.add('visible');
+  timerInterval = setInterval(() => {
+    timerSecs++;
+    timerEl.textContent = `${String(Math.floor(timerSecs/60)).padStart(2,'0')}:${String(timerSecs%60).padStart(2,'0')}`;
+  }, 1000);
+}
+function stopTimer() { clearInterval(timerInterval); timerEl.classList.remove('visible'); }
+function mapIceServers() {
+  return iceServers.map(s => ({ urls: s.urls||s.Urls, username: s.username||s.Username||undefined, credential: s.credential||s.Credential||undefined }));
+}
+</script>
+</body>
+</html>

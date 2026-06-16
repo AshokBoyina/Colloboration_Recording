@@ -1,0 +1,60 @@
+@inherits LayoutComponentBase
+@implements IDisposable
+@inject IAuthService Auth
+@inject NavigationManager Nav
+
+@if (_sessionRestored)
+{
+    <div class="page">
+        <div class="top-bar">
+            <span class="brand">NICE Platform Collaboration</span>
+            @if (Auth.Current.IsAuthenticated)
+            {
+                <span style="display:flex;align-items:center;gap:.75rem">
+                    <span>@Auth.Current.DisplayName</span>
+                    <span class="user-type-badge">@Auth.Current.UserType</span>
+                    <button class="btn btn-sm btn-outline-light" @onclick="Logout">Sign out</button>
+                </span>
+            }
+        </div>
+
+        <div class="main">
+            <main class="content">
+                @Body
+            </main>
+        </div>
+    </div>
+}
+else
+{
+    <!-- Blank while localStorage restore is in flight (< 1 render frame) -->
+    <div style="display:flex;align-items:center;justify-content:center;height:100vh;color:#999;font-size:.9rem">
+        Loading…
+    </div>
+}
+
+@code {
+    bool _sessionRestored = false;
+
+    protected override void OnInitialized() => Auth.OnChange += StateHasChanged;
+    public void Dispose()                   => Auth.OnChange -= StateHasChanged;
+
+    // JS interop (localStorage read) must happen after the first render.
+    // Gate the entire page tree behind _sessionRestored so protected pages
+    // (SupervisorView, AgentDashboard, etc.) see the correct IsAuthenticated
+    // state in their OnInitializedAsync rather than always-false on hard refresh.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        if (!Auth.Current.IsAuthenticated)
+            await Auth.TryRestoreAsync();
+        _sessionRestored = true;
+        StateHasChanged();
+    }
+
+    private async Task Logout()
+    {
+        await Auth.LogoutAsync();
+        Nav.NavigateTo("/login", replace: true);
+    }
+}

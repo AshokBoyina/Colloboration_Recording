@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);1591</NoWarn>
+    <!-- Standalone Recording API — exposes RecordingHub, AuthController,
+         RecordingsController and DemoController only. Full collaboration
+         endpoints (CollaborationHub, Messages, etc.) are excluded. -->
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Azure.SignalR" Version="1.33.0" />
+    <PackageReference Include="Swashbuckle.AspNetCore" Version="8.*" />
+    <PackageReference Include="Serilog.AspNetCore" Version="9.*" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.*" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\NICE.Platform.Collaboration.Application\NICE.Platform.Collaboration.Application.csproj" />
+    <ProjectReference Include="..\NICE.Platform.Collaboration.Infrastructure\NICE.Platform.Collaboration.Infrastructure.csproj" />
+    <ProjectReference Include="..\NICE.Platform.Collaboration.Core\NICE.Platform.Collaboration.Core.csproj" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,42 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>NICE.Platform.Collaboration.Recording</RootNamespace>
+
+    <!-- ── NuGet package metadata ───────────────────────────────────────────
+         An embeddable Blazor screen-recording component. Host apps install this
+         package, call AddCollaborationRecording(...) and drop <StandaloneRecorder/>
+         onto a page. Capture uses fragmented MP4 (MediaRecorder); the Standalone
+         Recording API de-fragments it into a progressive, WMP-compatible MP4. -->
+    <PackageId>NICE.Platform.Collaboration.Recording</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>NICE Systems</Authors>
+    <Description>Embeddable Blazor screen-recording component for NICE Collaboration. Captures the screen via MediaRecorder (fragmented MP4) and streams chunks to the Standalone Recording API, which de-fragments them into a progressive, Windows Media Player-compatible MP4.</Description>
+    <PackageTags>NICE;blazor;screen-recording;mediarecorder;mp4;component;razor-class-library</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <!-- Still publishable as a NuGet package via `dotnet pack`, but not auto-packed.
+         The in-solution consumer (NICE.Platform.StandaloneRecording.Client) uses a
+         ProjectReference for development. -->
+    <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <SupportedPlatform Include="browser" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.Components.Web" Version="10.*" />
+    <PackageReference Include="Microsoft.AspNetCore.SignalR.Client" Version="10.*" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.*" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" Version="10.*" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,204 @@
+@page "/login"
+@page "/"
+@inject IAuthService Auth
+@inject NavigationManager Nav
+
+<PageTitle>Sign In — NICE Collaboration</PageTitle>
+
+<div class="login-wrap">
+    <div class="login-card">
+
+        <div class="login-logo">
+            <div class="brand">NICE Platform</div>
+            <div class="sub">Collaboration Console</div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <div class="alert-error">@_error</div>
+        }
+
+        <div class="form-group">
+            <label class="form-label">Application <span style="font-weight:400;color:var(--nice-text-muted)">(X-Access-Key — e.g. SurveyPortal)</span></label>
+            <input type="text" class="form-control" @bind="_applicationName"
+                   placeholder="SurveyPortal" />
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">User Type</label>
+            <select class="form-control form-select" @bind="_userType">
+                <option value="External">External (customer / end user)</option>
+                <option value="Agent">Agent (support agent)</option>
+                <option value="Supervisor">Supervisor</option>
+                <option value="Internal">Internal (staff)</option>
+                <option value="Standalone">Standalone (screen recorder)</option>
+                <option value="StandaloneMonitor">StandaloneMonitor (watch standalone sessions)</option>
+            </select>
+        </div>
+
+        <!-- Auth provider routing badge — updates live with UserType selection -->
+        <div style="display:flex;align-items:center;gap:8px;margin:-4px 0 12px;padding:8px 12px;border-radius:8px;font-size:.78rem;
+                    background:@(_isExternal ? "#f0fdf4" : "#eff6ff");
+                    border:1px solid @(_isExternal ? "#86efac" : "#bfdbfe")">
+            <span style="font-size:1rem">@(_isExternal ? "🔓" : "🔐")</span>
+            <div>
+                @if (_isExternal)
+                {
+                    <span style="font-weight:600;color:#166534">External users always authenticate via <b>Anonymous (ANON)</b></span>
+                    <span style="color:#166534;opacity:.8"> — token is decoded locally, no external provider call.</span>
+                }
+                else
+                {
+                    <span style="font-weight:600;color:#1e40af">Staff authenticate via <b>LOCAL_JWT</b></span>
+                    <span style="color:#1e40af;opacity:.8"> — HMAC-signed token verified server-side. Mint via POST /api/v1/demo/mint-token.</span>
+                }
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">
+                @if (_isExternal)
+                {
+                    <span>Auth Token <span style="font-weight:400;color:var(--nice-text-muted)">— Anonymous JWT</span></span>
+                }
+                else
+                {
+                    <span>Auth Token <span style="font-weight:400;color:var(--nice-text-muted)">— LOCAL_JWT token</span></span>
+                }
+            </label>
+            <input type="text" class="form-control" @bind="_authToken"
+                   placeholder="@TokenPlaceholder" />
+        </div>
+
+        <div class="form-group">
+            <label class="form-label">API Key <span style="font-weight:400;color:var(--nice-text-muted)">(X-Api-Key — also used as Bot API key)</span></label>
+            <input type="text" class="form-control" @bind="_apiKey"
+                   placeholder="chat-ui-key" />
+        </div>
+
+        <button class="btn-login" @onclick="LoginAsync" disabled="@_loading">
+            @if (_loading)
+            {
+                <span style="display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;margin-right:8px;vertical-align:middle"></span>
+            }
+            Sign In
+        </button>
+
+        <div class="hint-box" style="margin-top:1rem;margin-bottom:.5rem">
+            <strong>Quick test combinations (LOCAL_JWT mode):</strong>
+            <ul>
+                <li>Any app + <b>External</b> → ANON auth → External chat widget (enter any name, e.g. <code>Troy M</code> or <code>Alice Smith</code>)</li>
+                <li>Any app + <b>Agent</b> → LOCAL_JWT → Agent console (mint token via <code>POST /api/v1/demo/mint-token?name=Alice+Smith&amp;role=Agent</code>)</li>
+                <li>Any app + <b>Supervisor</b> → LOCAL_JWT → Supervisor console</li>
+                <li>Any app + <b>Internal</b> → LOCAL_JWT → Internal chat</li>
+                <li>Any app + <b>Standalone</b> → LOCAL_JWT → Screen recorder (share + record)</li>
+                <li>Any app + <b>StandaloneMonitor</b> → LOCAL_JWT → Watch standalone sessions live</li>
+                <li><b>X-Api-Key</b> and <b>X-Access-Key</b> values are also forwarded as Bot API credentials.</li>
+            </ul>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_error))
+        {
+            <div style="color:#ef4444;font-size:.82rem;text-align:center;margin-top:.5rem">@_error</div>
+        }
+
+    </div>
+</div>
+
+@code {
+    // Field names match the @bind attributes used in the HTML above.
+    string _applicationName = "SurveyPortal";
+    string _userType        = "External";
+    string _authToken       = string.Empty;
+    string _apiKey          = "chat-ui-key";
+    string _error           = string.Empty;
+    bool   _loading         = false;
+
+    bool _isExternal  => _userType == "External";
+    bool _isStandalone => _userType is "Standalone" or "StandaloneMonitor";
+
+    // ── Auto-submit when navigated here with query params (e.g. from ChatPlugin WinApp) ──
+    protected override async Task OnInitializedAsync()
+    {
+        // Parse query string manually — no external package needed in Blazor WASM.
+        var rawQuery = new Uri(Nav.Uri).Query.TrimStart('?');
+        if (string.IsNullOrEmpty(rawQuery)) return;
+
+        var qs = rawQuery
+            .Split('&', StringSplitOptions.RemoveEmptyEntries)
+            .Select(p => p.Split('=', 2))
+            .Where(p => p.Length == 2)
+            .ToDictionary(
+                p => Uri.UnescapeDataString(p[0]),
+                p => Uri.UnescapeDataString(p[1]),
+                StringComparer.OrdinalIgnoreCase);
+
+        if (!qs.TryGetValue("token", out var qToken) || string.IsNullOrWhiteSpace(qToken))
+            return;
+
+        _authToken = qToken;
+        if (qs.TryGetValue("role",   out var qRole)   && !string.IsNullOrWhiteSpace(qRole))   _userType        = qRole;
+        if (qs.TryGetValue("apiKey", out var qApiKey) && !string.IsNullOrWhiteSpace(qApiKey)) _apiKey          = qApiKey;
+        if (qs.TryGetValue("app",    out var qApp)    && !string.IsNullOrWhiteSpace(qApp))    _applicationName = qApp;
+
+        // Auto-login — user lands directly on the chat page, no form interaction needed.
+        await LoginAsync();
+    }
+
+    string TokenPlaceholder => _isExternal
+        ? "e.g. Troy M  or  Alice Smith  or  alice-smith  (or a full anonymous JWT)"
+        : "Paste your LOCAL_JWT token here (mint via /api/v1/demo/mint-token)";
+
+    async Task LoginAsync()
+    {
+        _error   = string.Empty;
+        _loading = true;
+        StateHasChanged();
+
+        var apiKey = string.IsNullOrWhiteSpace(_apiKey) ? "chat-ui-key" : _apiKey;
+        var appName = string.IsNullOrWhiteSpace(_applicationName) ? "SurveyPortal" : _applicationName;
+
+        var req = new LoginRequest
+        {
+            ApiKey           = apiKey,
+            ApplicationName  = appName,
+            UserType         = _userType,
+            AuthToken        = _authToken,
+            // X-Api-Key doubles as the Bot API key; X-Access-Key doubles as Bot API access key
+            BotApiKey        = apiKey,
+            BotApiAccessKey  = appName
+        };
+
+        try
+        {
+            var result = await Auth.LoginAsync(req);
+            if (result.Success)
+            {
+                var dest = _userType switch
+                {
+                    "External"          => "/chat/external",
+                    "Agent"             => "/agent",
+                    "Supervisor"        => "/supervisor",
+                    "Internal"          => "/chat/internal",
+                    "Standalone"        => "/standalone",
+                    "StandaloneMonitor" => "/standalone-monitor",
+                    "StandAlone"        => "/recordings",   // legacy route kept for backward compat
+                    _                   => "/chat/external"
+                };
+                Nav.NavigateTo(dest);
+            }
+            else
+            {
+                _error = result.Error;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Login failed: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Standalone Recording — all 16 DB entities kept so schema is forward-compatible
+         with the full Collaboration Engine when it ships later. Only 6 tables are
+         actively used by this package; the remaining 10 sit empty. -->
+  </PropertyGroup>
+</Project>

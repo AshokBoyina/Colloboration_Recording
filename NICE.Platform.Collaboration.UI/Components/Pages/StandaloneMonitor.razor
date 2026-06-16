@@ -1,0 +1,491 @@
+@page "/standalone-monitor"
+@layout BlankLayout
+@inject IAuthService Auth
+@inject ICollaborationHubService Hub
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject IConfiguration Config
+@implements IAsyncDisposable
+
+<div class="nc-page">
+
+    <!-- ── Top bar ──────────────────────────────────────────── -->
+    <div class="nc-topbar">
+        <div class="nc-topbar-brand" style="display:flex;align-items:center;gap:8px">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" style="flex-shrink:0;opacity:.9">
+                <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5C21.27 7.61 17 4.5 12 4.5zm0 12.5a5 5 0 110-10 5 5 0 010 10zm0-8a3 3 0 100 6 3 3 0 000-6z" fill="white"/>
+            </svg>
+            <span>NASS Collaboration</span>
+            <span style="background:rgba(255,255,255,.2);border-radius:4px;padding:2px 8px;font-size:.72rem;font-weight:600">Standalone Monitor</span>
+        </div>
+        <div class="nc-topbar-meta" style="display:flex;align-items:center;gap:10px">
+            <span>Live sessions <b>@_sessions.Count</b></span>
+            @if (Hub.ConnectionState == HubConnectionState.Connected)
+            {
+                <span class="tag tag--green">● Connected</span>
+            }
+            else
+            {
+                <span class="tag tag--red">○ @Hub.ConnectionState</span>
+            }
+        </div>
+        <div class="nc-topbar-right" style="gap:10px">
+            <span style="font-size:.82rem;color:rgba(255,255,255,.85);font-weight:500">@Auth.Current.DisplayName</span>
+            <div class="nc-avatar-btn" style="background:@AvatarColor(Auth.Current.DisplayName)">@_initials</div>
+            <button @onclick="SignOut"
+                    style="background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.25);color:#fff;border-radius:6px;padding:4px 10px;font-size:.75rem;font-weight:600;cursor:pointer">
+                Sign out
+            </button>
+        </div>
+    </div>
+
+    <div class="nc-body">
+
+        <!-- ── Left sidebar — live sessions ─────────────────── -->
+        <div class="nc-sidebar">
+            <div class="nc-sidebar-hd">Standalone Sessions (@_sessions.Count)</div>
+            <div class="nc-sidebar-scroll">
+                @if (_sessions.Count == 0)
+                {
+                    <div style="padding:20px 12px;text-align:center;color:var(--nice-text-muted);font-size:.78rem">
+                        No active standalone sessions.<br/>Sessions appear here as users connect.
+                    </div>
+                }
+                @foreach (var s in _sessions.Values.OrderByDescending(x => x.StartedAt))
+                {
+                    var isSelected = s.CollaborationId == _selectedCollabId;
+                    <div class="nc-list-item @(isSelected ? "nc-list-item--active" : "")"
+                         @onclick="() => SelectSession(s.CollaborationId)">
+                        <div class="nc-item-av" style="background:@AvatarColor(s.UserName);flex-shrink:0">
+                            @Initials(s.UserName)
+                        </div>
+                        <div class="nc-item-body">
+                            <div class="nc-item-name">@s.UserName</div>
+                            <div class="nc-item-sub">
+                                @s.StartedAt.ToLocalTime().ToString("HH:mm")
+                                @if (s.IsStreaming)
+                                {
+                                    <span class="tag tag--green" style="font-size:.6rem;margin-left:4px">● Live</span>
+                                }
+                            </div>
+                        </div>
+                        <span class="tag tag--red" style="font-size:.62rem;flex-shrink:0">REC</span>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <!-- ── Centre panel — live stream ───────────────────── -->
+        <div class="nc-center">
+            @if (_selected != null)
+            {
+                <!-- Session header -->
+                <div class="nc-session-hd">
+                    <div class="nc-session-title">
+                        <div class="nc-item-av" style="background:@AvatarColor(_selected.UserName);width:28px;height:28px;font-size:.7rem">
+                            @Initials(_selected.UserName)
+                        </div>
+                        <span>@_selected.UserName</span>
+                        <span class="tag tag--red">● LIVE</span>
+                        <span class="tag tag--muted" style="font-size:.65rem">@_selected.StartedAt.ToLocalTime().ToString("HH:mm:ss")</span>
+                    </div>
+                    <div class="nc-session-actions">
+                        <button class="btn btn--secondary" style="font-size:.75rem;padding:5px 10px"
+                                @onclick="() => RefreshStream(_selected.CollaborationId)"
+                                title="Request a fresh screen-share offer">
+                            ↺ Refresh stream
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Video player -->
+                <div style="flex:1;min-height:0;display:flex;flex-direction:column;background:#111;position:relative;overflow:hidden">
+                    <video id="standalone-video-@_selected.CollaborationId"
+                           autoplay playsinline muted
+                           style="width:100%;height:100%;object-fit:contain;display:block;flex:1;min-height:0"
+                           onclick="this.play()"></video>
+
+                    <!-- LIVE badge -->
+                    <div style="position:absolute;top:10px;left:12px;display:flex;align-items:center;gap:5px;background:rgba(0,0,0,.65);border-radius:20px;padding:4px 12px;font-size:.65rem;color:#fff;font-weight:700">
+                        <span style="width:7px;height:7px;border-radius:50%;background:#ef4444;animation:pulse 1.5s infinite;display:inline-block"></span>
+                        LIVE · @_selected.UserName
+                    </div>
+
+                    <!-- Fullscreen button — direct onclick avoids Blazor async hop -->
+                    <button style="position:absolute;top:10px;right:12px;background:rgba(0,0,0,.55);border:none;border-radius:6px;color:#fff;cursor:pointer;padding:5px 10px;font-size:.8rem"
+                            title="Fullscreen"
+                            onclick="chatHelpers.requestFullscreen('standalone-video-@(_selected.CollaborationId)')">⛶</button>
+
+                    @if (!_selected.IsStreaming)
+                    {
+                        <!-- Overlay while waiting for stream -->
+                        <div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.6);flex-direction:column;gap:10px">
+                            <div style="width:32px;height:32px;border:3px solid rgba(255,255,255,.3);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite"></div>
+                            <span style="color:#fff;font-size:.82rem">Connecting to stream…</span>
+                        </div>
+                    }
+                </div>
+
+                <!-- Recording info bar -->
+                <div style="padding:8px 16px;background:#fff;border-top:1px solid var(--nice-border-soft);display:flex;align-items:center;gap:12px;flex-shrink:0;font-size:.78rem;color:var(--nice-text-muted)">
+                    <span>Session ID: <code style="font-size:.72rem">@_selected.CollaborationId[..8]…</code></span>
+                    <span class="tag tag--green" style="font-size:.65rem">💾 Local disk</span>
+                    <span class="tag tag--blue"  style="font-size:.65rem">☁ Azure Blob</span>
+                    <span style="margin-left:auto;font-size:.7rem">Recording saves automatically via chunk upload</span>
+                </div>
+            }
+            else
+            {
+                <div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--nice-text-muted);flex-direction:column;gap:10px">
+                    <svg width="48" height="48" viewBox="0 0 24 24" fill="none" opacity=".3">
+                        <path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5C21.27 7.61 17 4.5 12 4.5zm0 12.5a5 5 0 110-10 5 5 0 010 10z" fill="var(--nice-primary)"/>
+                    </svg>
+                    <span style="font-size:.88rem">Select a session from the sidebar to watch the live stream</span>
+                </div>
+            }
+        </div>
+
+        <!-- ── Right panel — stats + info ───────────────────── -->
+        <div class="nc-rightpanel">
+            <div class="nc-rp-section">
+                <div class="nc-rp-title">Monitor overview</div>
+                <div class="stat-grid">
+                    <div class="stat-card"><div class="n n--red">@_sessions.Count</div><div class="lbl">Live</div></div>
+                    <div class="stat-card"><div class="n">@_endedCount</div><div class="lbl">Ended</div></div>
+                </div>
+            </div>
+
+            @if (_selected != null)
+            {
+                <div class="nc-rp-section">
+                    <div class="nc-rp-title">Selected session</div>
+                    <div class="nc-rp-row"><span class="nc-rp-key">User</span><span class="nc-rp-val">@_selected.UserName</span></div>
+                    <div class="nc-rp-row"><span class="nc-rp-key">Started</span><span class="nc-rp-val">@_selected.StartedAt.ToLocalTime().ToString("HH:mm:ss")</span></div>
+                    <div class="nc-rp-row"><span class="nc-rp-key">Stream</span>
+                        <span class="nc-rp-val" style="color:@(_selected.IsStreaming ? "var(--nice-success)" : "var(--nice-text-muted)")">
+                            @(_selected.IsStreaming ? "● Live" : "○ Connecting")
+                        </span>
+                    </div>
+                    <div class="nc-rp-row"><span class="nc-rp-key">Storage</span><span class="nc-rp-val">Local + Blob</span></div>
+                </div>
+
+                <div class="nc-rp-section">
+                    <div class="nc-rp-title">Actions</div>
+                    <button class="btn--action" @onclick="() => RefreshStream(_selected.CollaborationId)">
+                        ↺ Refresh stream
+                    </button>
+                </div>
+            }
+
+            <div class="nc-rp-section">
+                <div class="nc-rp-title">Storage</div>
+                <div style="font-size:.75rem;color:var(--nice-text-muted);line-height:1.5">
+                    All recordings are saved to:<br/>
+                    <span class="tag tag--green" style="font-size:.65rem;margin-top:4px;display:inline-block">💾 Local disk</span>
+                    <span class="tag tag--blue"  style="font-size:.65rem;margin-top:4px;display:inline-block">☁ Azure Blob</span>
+                    <br/>
+                    <span style="font-size:.7rem;margin-top:4px;display:inline-block">
+                        Chunks are streamed in real-time — no data is lost if the session drops.
+                    </span>
+                </div>
+            </div>
+
+            <!-- ── WebRTC signalling log ─────────────────── -->
+            @if (_signalLog.Count > 0)
+            {
+                <div class="nc-rp-section">
+                    <div class="nc-rp-title" style="display:flex;justify-content:space-between;align-items:center">
+                        <span>Signalling Log</span>
+                        <button style="font-size:.6rem;padding:2px 6px;background:rgba(0,0,0,.06);border:1px solid var(--nice-border-soft);border-radius:4px;cursor:pointer;color:var(--nice-text-muted)"
+                                @onclick="() => { _signalLog.Clear(); StateHasChanged(); }">clear</button>
+                    </div>
+                    <div style="max-height:200px;overflow-y:auto;font-size:.65rem;font-family:monospace;line-height:1.6">
+                        @foreach (var line in _signalLog)
+                        {
+                            var color = line.Contains("✗") ? "#991b1b"
+                                      : line.Contains("⚠") ? "#92400e"
+                                      : line.Contains("✓") ? "#166534"
+                                      : "var(--nice-text-muted)";
+                            <div style="color:@color;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="@line">@line</div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    string _initials         = "SM";
+    string _selectedCollabId = "";
+    int    _endedCount       = 0;
+
+    Dictionary<string, StandaloneSessionInfo> _sessions = new();
+
+    StandaloneSessionInfo? _selected =>
+        _sessions.TryGetValue(_selectedCollabId, out var s) ? s : null;
+
+    bool _processingOffer = false;   // guard against concurrent receiveOffer calls
+
+    // ── Signalling diagnostics ──────────────────────────────────
+    List<string> _signalLog = new();
+    void AddSignalLog(string msg)
+    {
+        var entry = $"{DateTime.Now:HH:mm:ss} {msg}";
+        Console.WriteLine($"[StandaloneMonitor] {entry}");
+        _signalLog.Add(entry);
+        if (_signalLog.Count > 30) _signalLog.RemoveAt(0);
+        // StateHasChanged will be called by the caller at next natural point
+    }
+
+    // ── Lifecycle ──────────────────────────────────────────────
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Auth.Current.IsAuthenticated) { Nav.NavigateTo("/login", replace: true); return; }
+        _initials = Initials(Auth.Current.DisplayName);
+
+        Hub.OnStandaloneSessionStarted += OnSessionStarted;
+        Hub.OnStandaloneSessionsList   += OnSessionsList;
+        Hub.OnCollaborationEnded       += OnSessionEnded;
+        Hub.OnOffer                    += OnScreenShareOffer;
+        Hub.OnConnectionChanged        += OnConnectionChanged;
+        Hub.OnForceDisconnected        += OnForceDisconnected;
+
+        if (Hub.ConnectionState != HubConnectionState.Connected)
+        {
+            try { await Hub.ConnectAsync(); }
+            catch (Exception ex) { Console.WriteLine($"[StandaloneMonitor] Connect failed: {ex.Message}"); return; }
+        }
+
+        // Pull the current list of active standalone sessions
+        try { await Hub.GetStandaloneSessionsAsync(); } catch { }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Hub.OnStandaloneSessionStarted -= OnSessionStarted;
+        Hub.OnStandaloneSessionsList   -= OnSessionsList;
+        Hub.OnCollaborationEnded       -= OnSessionEnded;
+        Hub.OnOffer                    -= OnScreenShareOffer;
+        Hub.OnConnectionChanged        -= OnConnectionChanged;
+        Hub.OnForceDisconnected        -= OnForceDisconnected;
+
+        try { await JS.InvokeVoidAsync("screenShare.stop"); } catch { }
+        try { await Hub.DisconnectAsync(); } catch { }
+    }
+
+    // ── Hub event handlers ─────────────────────────────────────
+    Task OnSessionStarted(StandaloneSessionInfo info) => InvokeAsync(() =>
+    {
+        _sessions[info.CollaborationId] = info;
+        StateHasChanged();
+    });
+
+    Task OnSessionsList(List<StandaloneSessionInfo> list) => InvokeAsync(() =>
+    {
+        foreach (var s in list)
+            _sessions[s.CollaborationId] = s;
+        StateHasChanged();
+    });
+
+    Task OnSessionEnded(string collabId) => InvokeAsync(() =>
+    {
+        if (_sessions.Remove(collabId))
+        {
+            _endedCount++;
+            if (_selectedCollabId == collabId) _selectedCollabId = "";
+        }
+        StateHasChanged();
+    });
+
+    async Task OnScreenShareOffer(string collabId, string sdp)
+    {
+        // Log everything — this panel is visible in the UI so user can diagnose without DevTools
+        AddSignalLog($"← Offer arrived  collabId={collabId[..Math.Min(8,collabId.Length)]}  sdp={sdp?.Length ?? 0}B");
+
+        // Use OrdinalIgnoreCase: hub emits lowercase UUIDs but some code paths (e.g. EF Core's
+        // SQL CAST translation) may produce uppercase — the SelectSession normalisation handles
+        // the common case but this guard catches any edge cases.
+        if (!collabId.Equals(_selectedCollabId, StringComparison.OrdinalIgnoreCase))
+        {
+            AddSignalLog($"  ↳ ignored (selected={_selectedCollabId[..Math.Min(8,_selectedCollabId.Length)]})");
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+        if (_processingOffer)
+        {
+            AddSignalLog("  ↳ ignored (already processing an offer)");
+            await InvokeAsync(StateHasChanged);
+            return;
+        }
+        _processingOffer = true;
+
+        await InvokeAsync(async () =>
+        {
+            try
+            {
+                // Make sure the <video> element is in the DOM before calling JS
+                StateHasChanged();
+                await Task.Delay(50);
+
+                var videoId = $"standalone-video-{collabId}";
+                AddSignalLog($"  → calling receiveOffer  videoId={videoId[..Math.Min(30, videoId.Length)]}…");
+                StateHasChanged();
+
+                var answerSdp = await JS.InvokeAsync<string>(
+                    "screenShare.receiveOffer", collabId, sdp, videoId, false);
+
+                AddSignalLog($"  ← receiveOffer returned {answerSdp?.Length ?? 0}B");
+
+                if (!string.IsNullOrEmpty(answerSdp))
+                {
+                    AddSignalLog("  → ShareScreenAnswer to hub…");
+                    await Hub.ShareScreenAnswerAsync(collabId, answerSdp);
+                    AddSignalLog("  ✓ Answer sent — waiting for ontrack…");
+
+                    // Poll ICE state for up to 15 s — marks IsStreaming when connected
+                    _ = PollIceStateAsync(collabId);
+                }
+                else
+                {
+                    AddSignalLog("  ✗ receiveOffer returned empty — WebRTC setup failed!");
+                }
+                StateHasChanged();
+            }
+            catch (Exception ex)
+            {
+                AddSignalLog($"  ✗ Exception in OnScreenShareOffer: {ex.Message}");
+                StateHasChanged();
+            }
+            finally
+            {
+                _processingOffer = false;
+            }
+        });
+    }
+
+    /// <summary>
+    /// Polls the JS PeerConnection ICE state after an answer is sent so we can flip
+    /// IsStreaming=true (and remove the "Connecting…" overlay) as soon as WebRTC connects.
+    /// </summary>
+    async Task PollIceStateAsync(string collabId)
+    {
+        for (var i = 0; i < 30; i++)   // max 15 s (30 × 500 ms)
+        {
+            await Task.Delay(500);
+            try
+            {
+                var state = await JS.InvokeAsync<string>("screenShare.getViewPcState", collabId);
+                AddSignalLog($"  ICE[{i+1}] {state}");
+                await InvokeAsync(StateHasChanged);   // refresh log on every tick
+
+                if (state is "connected" or "completed")
+                {
+                    await InvokeAsync(() =>
+                    {
+                        if (_sessions.TryGetValue(collabId, out var sess)) sess.IsStreaming = true;
+                        StateHasChanged();
+                    });
+                    AddSignalLog("  ✓ WebRTC connected — stream should be live!");
+                    await InvokeAsync(StateHasChanged);
+                    return;
+                }
+                if (state is "failed" or "disconnected" or "closed")
+                {
+                    AddSignalLog($"  ✗ ICE failed: {state}");
+                    await InvokeAsync(StateHasChanged);
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                AddSignalLog($"  getViewPcState error: {ex.Message}");
+                return;
+            }
+        }
+        AddSignalLog("  ✗ ICE timed out after 15 s — connection not established");
+        await InvokeAsync(StateHasChanged);
+    }
+
+    void OnConnectionChanged() => InvokeAsync(StateHasChanged);
+
+    void OnForceDisconnected(string reason)
+    {
+        InvokeAsync(async () =>
+        {
+            await JS.InvokeVoidAsync("alert", $"Session ended: {reason}");
+            await Auth.LogoutAsync();
+            Nav.NavigateTo("/login", replace: true);
+        });
+    }
+
+    // ── Actions ────────────────────────────────────────────────
+    void SelectSession(string collabId)
+    {
+        // Normalise to lowercase so it matches hub-emitted UUIDs (C# Guid.ToString() = lowercase).
+        // GetStandaloneSessions used to return uppercase UUIDs because EF Core translated
+        // Guid.ToString() to SQL CAST which returns uppercase — the server is now fixed, but
+        // we keep the normalisation here as a safety net for any residual casing discrepancies.
+        _selectedCollabId = collabId.ToLowerInvariant();
+        _processingOffer  = false;
+        _signalLog.Clear();           // fresh log for newly selected session
+        AddSignalLog($"Session selected: {collabId[..Math.Min(8,collabId.Length)]}…");
+        StateHasChanged();
+
+        // Join the collab group — hub then sends ScreenOfferRequested to the Standalone user,
+        // who responds with an SDP offer → OnScreenShareOffer fires → video streams.
+        InvokeAsync(async () =>
+        {
+            try
+            {
+                AddSignalLog("→ JoinStandaloneSession sent to hub…");
+                await Hub.JoinStandaloneSessionAsync(collabId);
+                AddSignalLog("✓ Joined — waiting for ScreenOfferRequested→Offer from Standalone…");
+                await InvokeAsync(StateHasChanged);
+            }
+            catch (Exception ex)
+            {
+                AddSignalLog($"✗ JoinStandaloneSession error: {ex.Message}");
+                await InvokeAsync(StateHasChanged);
+            }
+        });
+    }
+
+    async Task RefreshStream(string collabId)
+    {
+        _signalLog.Clear();
+        AddSignalLog("↺ RefreshStream — re-joining session…");
+        _processingOffer = false;
+        try
+        {
+            await Hub.JoinStandaloneSessionAsync(collabId);
+            AddSignalLog("✓ Re-joined — waiting for Offer…");
+        }
+        catch (Exception ex)
+        {
+            AddSignalLog($"✗ RefreshStream error: {ex.Message}");
+        }
+        StateHasChanged();
+    }
+
+    async Task SignOut()
+    {
+        try { await Hub.DisconnectAsync(); } catch { }
+        await Auth.LogoutAsync();
+        Nav.NavigateTo("/login", replace: true);
+    }
+
+    // ── Helpers ────────────────────────────────────────────────
+    static string Initials(string name)
+    {
+        var p = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return p.Length >= 2 ? $"{p[0][0]}{p[^1][0]}".ToUpperInvariant()
+             : name.Length > 0 ? name[0].ToString().ToUpperInvariant() : "SM";
+    }
+
+    static string AvatarColor(string name)
+    {
+        var colors = new[] { "#003727","#1d4ed8","#7c3aed","#be185d","#b45309","#0f766e" };
+        return colors[Math.Abs(name.Aggregate(0, (a, c) => a ^ c)) % colors.Length];
+    }
+}
