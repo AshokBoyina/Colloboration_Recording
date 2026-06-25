@@ -94,21 +94,23 @@ public class AuthController(
         }
 
         // 4. Route to the correct auth provider ──────────────────────────────
-        //    External users always authenticate anonymously (ANON) — the token is decoded
-        //    locally without calling any external identity provider.
-        //
-        //    Staff (Agent, Supervisor, Internal, StandAlone, …) provider precedence:
-        //      1. The application's explicit StaffAuthProvider (per-app override), else
-        //      2. FeatureFlags:UseReadiAuth → READI (global non-demo default), else
-        //      3. error — nothing configured.
+        //    External users always authenticate anonymously (ANON).
+        //    Staff users:
+        //      1. If FeatureFlags:UseReadiAuth=true, force READI
+        //      2. Else use per-app StaffAuthProvider
+        //      3. Else error
         AuthProvider provider;
         if (userType == UserType.External)
         {
             provider = AuthProvider.ANON;
         }
+        else if (featureFlags.Value.UseReadiAuth)
+        {
+            // Global hard switch: force READI for all staff users.
+            provider = AuthProvider.READI;
+        }
         else if (!string.IsNullOrWhiteSpace(appConfig.StaffAuthProvider))
         {
-            // (1) Per-application override wins, even when the global flag is on.
             if (!Enum.TryParse<AuthProvider>(appConfig.StaffAuthProvider, ignoreCase: true, out provider))
             {
                 return StatusCode(StatusCodes.Status500InternalServerError, Fail(
@@ -116,14 +118,8 @@ public class AuthController(
                     $"'{appConfig.StaffAuthProvider}'. Accepted values: READI, ANON, LOCAL_JWT."));
             }
         }
-        else if (featureFlags.Value.UseReadiAuth)
-        {
-            // (2) No per-app provider set — fall back to the global READI default.
-            provider = AuthProvider.READI;
-        }
         else
         {
-            // (3) Neither a per-app provider nor the global flag — cannot route.
             return StatusCode(StatusCodes.Status500InternalServerError, Fail(
                 $"Application '{applicationName}' has no StaffAuthProvider configured and " +
                 "FeatureFlags:UseReadiAuth is false. Set a StaffAuthProvider " +
