@@ -84,11 +84,36 @@ public sealed class LocalDiskStreamStore(
     {
         if (!_streams.TryGetValue(recordingId, out var stream))
         {
-            logger.LogWarning("RecordingStream: no open stream for {Id} — chunk dropped", recordingId);
-            return;
+            stream = EnsureStreamForAppend(recordingId);
+            logger.LogWarning(
+                "RecordingStream: recovered missing stream for {Id}; appending to {Path}",
+                recordingId,
+                _paths.TryGetValue(recordingId, out var p) ? p : "(unknown)");
         }
         await stream.WriteAsync(chunk, ct);
         await stream.FlushAsync(ct);
+    }
+
+    private FileStream EnsureStreamForAppend(Guid recordingId)
+    {
+        if (_streams.TryGetValue(recordingId, out var existing)) return existing;
+
+        var path = _paths.TryGetValue(recordingId, out var knownPath)
+            ? knownPath
+            : Path.Combine(RootPath, DateFolder, $"{recordingId}.mp4");
+
+        var dir = Path.GetDirectoryName(path);
+        if (!string.IsNullOrWhiteSpace(dir)) Directory.CreateDirectory(dir);
+
+        var candidate = new FileStream(path, FileMode.Append, FileAccess.Write, FileShare.Read,
+            bufferSize: 65536, useAsync: true);
+
+        var stream = _streams.GetOrAdd(recordingId, candidate);
+        if (!ReferenceEquals(stream, candidate))
+            candidate.Dispose();
+
+        _paths[recordingId] = path;
+        return stream;
     }
 
     // ── Finalize ─────────────────────────────────────────────────────────────
