@@ -7,12 +7,10 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
-using NICE.Platform.Collaboration.API.Services;
 using NICE.Platform.Collaboration.Application.Features.Recordings.Commands.StartRecording;
 using NICE.Platform.Collaboration.Application.Features.Recordings.Commands.StopRecording;
 using NICE.Platform.Collaboration.Application.Features.Recordings.Queries.GetRecordingsByCollaboration;
 using NICE.Platform.Collaboration.Application.Features.Recordings.Queries.GetRecordingSasUrl;
-using NICE.Platform.Collaboration.Application.Interfaces.Auth;
 using NICE.Platform.Collaboration.Application.Interfaces.Services;
 using NICE.Platform.Collaboration.Core.Requests;
 using NICE.Platform.Collaboration.Infrastructure.Persistence;
@@ -26,9 +24,7 @@ public class RecordingsController(
     IRecordingStreamStore      store,
     IRecordingSessionTracker   tracker,
     IHubContext<RecordingHub>  hubContext,
-    CollaborationDbContext      db,
-    SignalRAccessTokenBridge    tokenBridge,
-    ITokenService               tokenService) : ControllerBase
+    CollaborationDbContext      db) : ControllerBase
 {
     private Guid CallerId =>
         Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier)
@@ -95,12 +91,12 @@ public class RecordingsController(
     /// Header: X-Recording-MimeType: {string} (optional, informational)
     /// </summary>
     [HttpPost("{id:guid}/chunks")]
-    [AllowAnonymous]
     [RequestSizeLimit(2 * 1024 * 1024)]   // 2 MB max per chunk
     public async Task<IActionResult> UploadChunk(Guid id, CancellationToken ct)
     {
-        if (!await IsChunkRequestAuthorizedAsync(ct))
-            return Unauthorized(new { error = "Unauthorized chunk upload token." });
+        // [Authorize] (class-level, JwtBearer) already gates this — the agent connects
+        // with an internal session token (obtained via /auth/validate for READI users,
+        // or a LOCAL_JWT for demo). No custom token handling needed here.
 
         // Read raw binary body
         using var ms = new MemoryStream();
@@ -136,38 +132,6 @@ public class RecordingsController(
             SizeBytes   = chunk.Length,
             LocalPath   = store.GetLocalPath(id)
         });
-    }
-
-    private async Task<bool> IsChunkRequestAuthorizedAsync(CancellationToken ct)
-    {
-        var authHeader = Request.Headers.Authorization.ToString();
-        if (string.IsNullOrWhiteSpace(authHeader) ||
-            !authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
-            return false;
-
-        var token = authHeader["Bearer ".Length..].Trim();
-        if (string.IsNullOrWhiteSpace(token)) return false;
-
-        if (tokenBridge.IsInternalSessionToken(token))
-        {
-            try
-            {
-                _ = tokenService.ValidateToken(token);
-                return true;
-            }
-            catch
-            {
-                return false;
-            }
-        }
-
-        var appName = Request.Query["applicationName"].FirstOrDefault()
-                      ?? Request.Query["appName"].FirstOrDefault()
-                      ?? Request.Query["accessKey"].FirstOrDefault()
-                      ?? Request.Headers["X-Access-Key"].FirstOrDefault();
-
-        var bridged = await tokenBridge.TryExchangeAsync(token, appName, ct);
-        return !string.IsNullOrWhiteSpace(bridged);
     }
 
     // ── HTTP range-streaming for supervisor live / completed playback ─────────

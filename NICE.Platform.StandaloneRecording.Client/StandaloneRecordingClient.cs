@@ -58,6 +58,36 @@ public sealed class StandaloneRecordingClient
                ?? throw new InvalidOperationException("mint-token response missing 'token' field.");
     }
 
+    // ── Validate-first token exchange ─────────────────────────────────────────
+
+    /// <summary>
+    /// Exchanges an external token (e.g. a READI token) for an internal session token
+    /// via POST /api/v1/collaboration/auth/validate. Use this when the host is handed an
+    /// external token: the returned session token authenticates the recording hubs and
+    /// chunk uploads directly (validate-first — no server-side token bridge needed).
+    /// Demo/LOCAL_JWT tokens are already internal and don't need this.
+    /// </summary>
+    public async Task<string> ExchangeForSessionTokenAsync(
+        string externalToken, string userType = "StandAlone", CancellationToken ct = default)
+    {
+        // The named HttpClient already sends X-Api-Key and X-Access-Key; add the
+        // per-request auth headers /auth/validate expects.
+        using var req = new HttpRequestMessage(HttpMethod.Post, "api/v1/collaboration/auth/validate");
+        req.Headers.TryAddWithoutValidation("AuthToken", externalToken);
+        req.Headers.TryAddWithoutValidation("UserType", userType);
+
+        using var response = await _http.SendAsync(req, ct);
+        response.EnsureSuccessStatusCode();
+
+        using var doc = JsonDocument.Parse(await response.Content.ReadAsStringAsync(ct));
+        var root = doc.RootElement;
+        foreach (var name in new[] { "sessionToken", "SessionToken" })
+            if (root.TryGetProperty(name, out var el) && el.ValueKind == JsonValueKind.String)
+                return el.GetString()!;
+
+        throw new InvalidOperationException("auth/validate response did not contain a session token.");
+    }
+
     // ── Deep-link URL builders ────────────────────────────────────────────────
 
     /// <summary>

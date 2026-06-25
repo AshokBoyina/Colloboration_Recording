@@ -111,6 +111,16 @@
                 token = await Client.GetOrMintTokenAsync(name: _userName, role: "StandAlone");
                 Log($"minted token for '{_userName}'");
             }
+
+            // Validate-first: internal tokens (demo LOCAL_JWT / session tokens) carry a GUID
+            // 'app' claim and are used directly. An external token (e.g. READI) is exchanged
+            // for an internal session token via /auth/validate before recording.
+            if (!IsInternalToken(token))
+            {
+                Log("external token → exchanging for a session token via /auth/validate…");
+                token = await Client.ExchangeForSessionTokenAsync(token, "StandAlone");
+                Log("received internal session token");
+            }
             _appId ??= JwtClaim(token, "app");
 
             await JS.InvokeVoidAsync("niceScreenRecording.start",
@@ -143,6 +153,10 @@
         _log = $"[{DateTime.Now:HH:mm:ss}] {msg}\n" + _log;
         StateHasChanged();
     }
+
+    // Internal/usable-directly tokens (our demo LOCAL_JWT and session tokens) carry a
+    // GUID 'app' claim. External READI tokens do not.
+    private static bool IsInternalToken(string token) => Guid.TryParse(JwtClaim(token, "app"), out _);
 
     private static string? JwtClaim(string jwt, string name)
     {
