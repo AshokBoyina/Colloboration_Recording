@@ -113,6 +113,7 @@ if (builder.Configuration.GetValue<bool>("FeatureFlags:UseAzureSignalR"))
 
 // ── ISignalRNotifier registered here (avoids Infrastructure→API circular dep) ──
 builder.Services.AddScoped<ISignalRNotifier, SignalRNotifier>();
+builder.Services.AddScoped<SignalRAccessTokenBridge>();
 
 // ── JWT bearer auth ────────────────────────────────────────────────────────
 builder.Services
@@ -136,15 +137,32 @@ builder.Services
         // SignalR WebSocket connections pass the token as ?access_token=...
         options.Events = new JwtBearerEvents
         {
-            OnMessageReceived = ctx =>
+            OnMessageReceived = async ctx =>
             {
                 var accessToken = ctx.Request.Query["access_token"];
                 if (!string.IsNullOrEmpty(accessToken) &&
                     ctx.HttpContext.Request.Path.StartsWithSegments("/hubs"))
                 {
-                    ctx.Token = accessToken;
+                    var bridge = ctx.HttpContext.RequestServices
+                        .GetRequiredService<SignalRAccessTokenBridge>();
+
+                    if (bridge.IsInternalSessionToken(accessToken!))
+                    {
+                        ctx.Token = accessToken;
+                        return;
+                    }
+
+                    var appName = ctx.Request.Query["applicationName"].FirstOrDefault()
+                                  ?? ctx.Request.Query["appName"].FirstOrDefault()
+                                  ?? ctx.Request.Query["accessKey"].FirstOrDefault();
+
+                    var bridged = await bridge.TryExchangeAsync(
+                        accessToken!, appName, ctx.HttpContext.RequestAborted);
+
+                    ctx.Token = string.IsNullOrWhiteSpace(bridged)
+                        ? accessToken
+                        : bridged;
                 }
-                return Task.CompletedTask;
             }
         };
     });
