@@ -161,6 +161,59 @@ curl -k -X POST https://localhost:65167/api/v1/collaboration/auth/validate `
 ✅ Pass = with mock on, a staff (non-External) validate returns success via READI;
 External users still route to ANON.
 
+## 7. Test E — Prod flags (Azure Blob, Azure SignalR, custom TURN)
+
+Put test values in **appsettings.Development.json** so the prod baseline stays clean
+(Development overrides win when you `dotnet run`).
+
+### E1 — `UseAzureBlob` with the Azurite emulator (no Azure account needed)
+
+1. Install + start Azurite (local Azure Storage emulator):
+   ```powershell
+   npm install -g azurite
+   azurite --silent --location ./azurite-data       # blob endpoint http://127.0.0.1:10000
+   ```
+   (or Docker: `docker run -p 10000:10000 mcr.microsoft.com/azure-storage/azurite`; it also
+   ships with Visual Studio.)
+2. In `NICE.Platform.Collaboration.API/appsettings.Development.json`:
+   ```jsonc
+   {
+     "FeatureFlags": { "UseAzureBlob": true },
+     "Azure": { "Blob": { "ConnectionString": "UseDevelopmentStorage=true", "Container": "collaboration" } }
+   }
+   ```
+3. `dotnet run --project NICE.Platform.Collaboration.API` — startup must NOT throw
+   (a bad/empty connection string fails fast).
+4. Record a clip (recorder.html or the 5300 client) and **Stop**.
+5. Verify in the API log: `AzureBlobStreamStore: uploaded recordings/<date>/<id>.mp4 (... bytes) to Azure Blob`.
+6. Verify the blob exists and plays:
+   ```powershell
+   az storage blob list --container-name collaboration --connection-string "UseDevelopmentStorage=true" -o table
+   ```
+   (or use Azure Storage Explorer → "Local & Attached" → Storage Accounts → Emulator →
+   Blob Containers → collaboration → `recordings/<date>/<id>.mp4` → Download → plays in WMP.)
+7. Verify the **local scratch file is gone** (the file under `LocalStorage:RecordingsPath` was
+   deleted after upload — Azure is now the durable store).
+8. Verify SAS playback: `GET /api/v1/collaboration/recordings/{id}/sas-url` → returns an
+   emulator blob URL with a SAS token → open it in the browser → the MP4 downloads/plays.
+
+✅ Pass = the recording lands in the blob container, plays in WMP, the SAS URL works, and the
+local temp copy is removed. For a **real** account, just set the connection string to your
+storage account's key-based connection string (Portal → Access keys); the container is created
+automatically.
+
+### E2 — `UseAzureSignalR`
+Needs a real **Azure SignalR Service** (no local emulator). Provision one (Default mode), set
+`Azure:SignalR:ConnectionString`, `FeatureFlags:UseAzureSignalR=true`. Startup fails fast if the
+connection string is still the placeholder. Pass = recorder + monitor still connect and stream
+(traffic now flows through Azure SignalR; check the resource's "Live traces"/metrics).
+
+### E3 — `UseCustomTurn`
+Needs a TURN server (e.g. coturn). Set `IceServers:TurnServer` (`Urls`/`Username`/`Credential`),
+`FeatureFlags:UseCustomTurn=true`. Pass = the recorder/monitor receive your TURN servers in the
+`IceServersReady` event and ICE uses `relay` candidates — verify in `chrome://webrtc-internals`
+(look for candidate type `relay`). Recording/chunk upload doesn't use TURN; only the live view does.
+
 ## Success checklist
 
 - [ ] `dotnet build` clean.
@@ -169,3 +222,4 @@ External users still route to ANON.
 - [ ] Monitor console connects and shows a live session (Test B).
 - [ ] Package `start()/stop()` from JS produces a playable file; `collaborationId` honored (Test C).
 - [ ] READI routing works with the flag/override (Test D).
+- [ ] UseAzureBlob: recording uploads to the blob container and SAS playback works (Test E1).

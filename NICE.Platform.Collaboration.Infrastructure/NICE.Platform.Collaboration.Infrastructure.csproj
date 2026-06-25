@@ -3,8 +3,8 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
-    <!-- Standalone scope: LocalDisk storage only (no Azure Blob), LocalJwt + Anon auth
-         validators only, Recordings + OnboardUser handlers only, no Bot/Webhook/Collab. -->
+    <!-- LocalDisk storage by default; Azure Blob is opt-in via FeatureFlags:UseAzureBlob.
+         LocalJwt + Anon + READI auth validators; Recordings + OnboardUser handlers. -->
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.*" />
@@ -12,6 +12,7 @@
     <PackageReference Include="Microsoft.Extensions.Http" Version="10.*" />
     <PackageReference Include="MediatR" Version="12.*" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.*" />
+    <PackageReference Include="Azure.Storage.Blobs" Version="12.*" />
   </ItemGroup>
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />

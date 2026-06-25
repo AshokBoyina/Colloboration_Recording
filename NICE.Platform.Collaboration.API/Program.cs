@@ -92,10 +92,24 @@ builder.Services.AddSwaggerGen(options =>
 });
 
 // ── SignalR ────────────────────────────────────────────────────────────────
-builder.Services.AddSignalR(opts =>
+var signalRBuilder = builder.Services.AddSignalR(opts =>
 {
     opts.MaximumReceiveMessageSize = 512 * 1024;  // 512 KB — handles recording chunk metadata
 });
+
+// FeatureFlags:UseAzureSignalR → route SignalR through Azure SignalR Service (Default mode).
+// No hub/client code changes: MapHub routes stay the same; Azure SignalR proxies the sockets.
+if (builder.Configuration.GetValue<bool>("FeatureFlags:UseAzureSignalR"))
+{
+    var azureConn = builder.Configuration["Azure:SignalR:ConnectionString"];
+    if (string.IsNullOrWhiteSpace(azureConn) ||
+        azureConn.StartsWith("REPLACE_", StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException(
+            "FeatureFlags:UseAzureSignalR is true but Azure:SignalR:ConnectionString is not set " +
+            "(Section 9 of appsettings.json).");
+
+    signalRBuilder.AddAzureSignalR(azureConn);
+}
 
 // ── ISignalRNotifier registered here (avoids Infrastructure→API circular dep) ──
 builder.Services.AddScoped<ISignalRNotifier, SignalRNotifier>();
