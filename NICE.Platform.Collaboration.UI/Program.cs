@@ -29,5 +29,11 @@ builder.Services.AddScoped<IDemoApiService, DemoApiService>();
 // this block, the ProjectReference in the .csproj, Components/Pages/RecorderTest.razor,
 // and the recording @using in _Imports.razor.
 builder.Services.AddCollaborationRecording(o => o.ApiBaseUrl = apiBase);
+builder.Services.PostConfigure<RecordingOptions>(o =>
+{
+    o.ApplicationName ??= builder.Configuration["RecordingApplicationName"] ?? "Readi";
+    o.ApiKey          ??= builder.Configuration["RecordingApiKey"] ?? "chat-ui-key";
+    o.UserType         = builder.Configuration["RecordingUserType"] ?? o.UserType;
+});
 
 await builder.Build().RunAsync();
