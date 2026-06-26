@@ -47,6 +47,9 @@ else
     // ── Parameters (override the bound RecordingOptions when set) ──────────────
     [Parameter] public string? ApiBaseUrl    { get; set; }
     [Parameter] public string? ApplicationId { get; set; }
+    [Parameter] public string? ApplicationName { get; set; }
+    [Parameter] public string? ApiKey { get; set; }
+    [Parameter] public string? UserType { get; set; }
     [Parameter] public string? AccessToken   { get; set; }
 
     /// <summary>
@@ -89,6 +92,9 @@ else
     private RecordingOptions Opts => OptionsAccessor.Value;
     private string EffectiveApiBase => (ApiBaseUrl ?? Opts.ApiBaseUrl).TrimEnd('/');
     private string EffectiveAppId   => ApplicationId ?? Opts.ApplicationId;
+    private string EffectiveAppName => ApplicationName ?? Opts.ApplicationName ?? "Readi";
+    private string EffectiveApiKey  => ApiKey ?? Opts.ApiKey ?? string.Empty;
+    private string EffectiveUserType => UserType ?? Opts.UserType ?? "StandAlone";
     // Token precedence: the per-call token passed to StartAsync (user-specific,
     // supplied at the moment recording starts) ▸ the AccessToken parameter ▸ options.
     private string EffectiveToken   => _startToken ?? AccessToken ?? Opts.AccessToken ?? string.Empty;
@@ -96,6 +102,7 @@ else
 
     // The access token captured for the current recording (passed at start time).
     private string? _startToken;
+    private string? _sessionToken;
     // Optional caller-supplied collaboration/session id (passed at start time).
     private string? _collaborationId;
 
@@ -144,6 +151,12 @@ else
             return;
         }
 
+        if (string.IsNullOrWhiteSpace(EffectiveApiKey) || string.IsNullOrWhiteSpace(EffectiveAppName))
+        {
+            await SetError("Validate-first auth requires ApiKey and ApplicationName configuration.");
+            return;
+        }
+
         _busy = true;
         SetState(RecorderState.Starting, "Connecting…");
         try
@@ -157,11 +170,25 @@ else
             MimeType      = await _module.InvokeAsync<string>("acquire", _handle);
             _captureReady = true;
 
-            // 2) Collaboration hub — creates the standalone session the monitor lists and
+            // 2) Validate-first auth model: exchange external token for internal session JWT.
+            _sessionToken = await _module.InvokeAsync<string>("validateToken", new
+            {
+                apiBase   = EffectiveApiBase,
+                apiKey    = EffectiveApiKey,
+                appName   = EffectiveAppName,
+                authToken = EffectiveToken,
+                userType  = EffectiveUserType
+            });
+
+            if (string.IsNullOrWhiteSpace(_sessionToken))
+                throw new InvalidOperationException("auth/validate returned no SessionToken.");
+
+            // 3) Collaboration hub — creates the standalone session the monitor lists and
             //    carries the live WebRTC signalling.
-            var tok = Uri.EscapeDataString(EffectiveToken);
+            var tok = Uri.EscapeDataString(_sessionToken);
+            var app = Uri.EscapeDataString(EffectiveAppName);
             _collabHub = new Microsoft.AspNetCore.SignalR.Client.HubConnectionBuilder()
-                .WithUrl($"{EffectiveApiBase}/hubs/v1/collaboration?access_token={tok}")
+                .WithUrl($"{EffectiveApiBase}/hubs/v1/collaboration?access_token={tok}&applicationName={app}")
                 .WithAutomaticReconnect()
                 .Build();
 
@@ -197,9 +224,10 @@ else
     {
         try
         {
-            var tok = Uri.EscapeDataString(EffectiveToken);
+            var tok = Uri.EscapeDataString(_sessionToken ?? string.Empty);
+            var app = Uri.EscapeDataString(EffectiveAppName);
             _hub = new Microsoft.AspNetCore.SignalR.Client.HubConnectionBuilder()
-                .WithUrl($"{EffectiveApiBase}/hubs/v1/recording?access_token={tok}")
+                .WithUrl($"{EffectiveApiBase}/hubs/v1/recording?access_token={tok}&applicationName={app}")
                 .WithAutomaticReconnect()
                 .Build();
 
@@ -225,12 +253,14 @@ else
     {
         try
         {
-            var chunkUrl = $"{EffectiveApiBase}/api/v1/collaboration/recordings/{_recordingId}/chunks";
+            var app = Uri.EscapeDataString(EffectiveAppName);
+            var chunkUrl = $"{EffectiveApiBase}/api/v1/collaboration/recordings/{_recordingId}/chunks?applicationName={app}";
             await _module!.InvokeVoidAsync("beginUpload", _selfRef, new
             {
                 handle             = _handle,
                 chunkUrl,
-                token              = EffectiveToken,
+                token              = _sessionToken,
+                accessKey          = EffectiveAppName,
                 videoBitsPerSecond = Opts.VideoBitsPerSecond,
                 timesliceMs        = Opts.TimesliceMs
             });
@@ -360,6 +390,7 @@ else
             try { await _collabHub.DisposeAsync(); } catch { /* best effort */ }
             _collabHub = null;
         }
+        _sessionToken = null;
         _recordingId  = null;
         _liveCollabId = null;
         _captureReady = false;
