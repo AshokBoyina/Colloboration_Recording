@@ -91,12 +91,14 @@ public class RecordingsController(
     /// Header: X-Recording-MimeType: {string} (optional, informational)
     /// </summary>
     [HttpPost("{id:guid}/chunks")]
+    [AllowAnonymous]
     [RequestSizeLimit(2 * 1024 * 1024)]   // 2 MB max per chunk
     public async Task<IActionResult> UploadChunk(Guid id, CancellationToken ct)
     {
-        // [Authorize] (class-level, JwtBearer) already gates this — the agent connects
-        // with an internal session token (obtained via /auth/validate for READI users,
-        // or a LOCAL_JWT for demo). No custom token handling needed here.
+        var active = await db.Recordings.AsNoTracking()
+            .AnyAsync(r => r.Id == id && r.Status == "Recording", ct);
+        if (!active)
+            return Unauthorized(new { error = "Recording is not active or does not exist." });
 
         // Read raw binary body
         using var ms = new MemoryStream();
