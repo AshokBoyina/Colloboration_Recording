@@ -21,6 +21,13 @@ builder.Services.AddStandaloneRecordingClient(builder.Configuration);
 
 // The NuGet package under test. ApiBaseUrl is app-wide; the user-specific token and
 // the collaborationId are passed at start time from the Recorder page.
-builder.Services.AddCollaborationRecording(o => o.ApiBaseUrl = apiBase);
+builder.Services.AddCollaborationRecording(o =>
+{
+    o.ApiBaseUrl       = apiBase;
+    o.ApplicationName  = cfg.ApplicationName;
+    o.ApiKey           = cfg.ApiKey;
+    o.UserType         = cfg.UserRole;
+    o.AccessToken      = string.IsNullOrWhiteSpace(cfg.AccessToken) ? null : cfg.AccessToken;
+});
 
 await builder.Build().RunAsync();
