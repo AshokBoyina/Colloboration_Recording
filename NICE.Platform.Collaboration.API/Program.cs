@@ -113,6 +113,7 @@ if (builder.Configuration.GetValue<bool>("FeatureFlags:UseAzureSignalR"))
 
 // ── ISignalRNotifier registered here (avoids Infrastructure→API circular dep) ──
 builder.Services.AddScoped<ISignalRNotifier, SignalRNotifier>();
+builder.Services.AddScoped<SignalRAccessTokenBridge>();
 
 // ── JWT bearer auth ────────────────────────────────────────────────────────
 builder.Services
@@ -133,21 +134,38 @@ builder.Services
             ClockSkew                = TimeSpan.FromMinutes(2)
         };
 
-        // SignalR WebSocket connections pass the (internal session) token as
-        // ?access_token=...  Clients obtain that token via POST /auth/validate
-        // (which exchanges an external READI token for an internal session token),
-        // so the hub just validates it here with standard JwtBearer.
+        // SignalR WebSocket connections pass the token as ?access_token=...
+        // If the incoming token is an external READI token, bridge it to an
+        // internal session JWT before normal JwtBearer validation.
         options.Events = new JwtBearerEvents
         {
-            OnMessageReceived = ctx =>
+            OnMessageReceived = async ctx =>
             {
-                var accessToken = ctx.Request.Query["access_token"];
-                if (!string.IsNullOrEmpty(accessToken) &&
+                var accessToken = ctx.Request.Query["access_token"].FirstOrDefault();
+                if (!string.IsNullOrWhiteSpace(accessToken) &&
                     ctx.HttpContext.Request.Path.StartsWithSegments("/hubs"))
                 {
-                    ctx.Token = accessToken;
+                    var bridge = ctx.HttpContext.RequestServices
+                        .GetRequiredService<SignalRAccessTokenBridge>();
+
+                    if (bridge.IsInternalSessionToken(accessToken))
+                    {
+                        ctx.Token = accessToken;
+                        return;
+                    }
+
+                    var appName = ctx.Request.Query["applicationName"].FirstOrDefault()
+                                  ?? ctx.Request.Query["appName"].FirstOrDefault()
+                                  ?? ctx.Request.Query["accessKey"].FirstOrDefault()
+                                  ?? ctx.Request.Headers["X-Access-Key"].FirstOrDefault();
+
+                    var bridged = await bridge.TryExchangeAsync(
+                        accessToken, appName, ctx.HttpContext.RequestAborted);
+
+                    ctx.Token = string.IsNullOrWhiteSpace(bridged)
+                        ? accessToken
+                        : bridged;
                 }
-                return Task.CompletedTask;
             }
         };
     });
