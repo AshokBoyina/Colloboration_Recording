@@ -29,6 +29,27 @@ const MIME_PREFERENCES = [
 // (or sequential recordings) never collide.
 const sessions = new Map();
 
+export async function validateToken(opts) {
+  const apiBase = (opts.apiBase || '').replace(/\/$/, '');
+  const res = await fetch(`${apiBase}/api/v1/collaboration/auth/validate`, {
+    method: 'POST',
+    headers: {
+      'X-Api-Key': opts.apiKey,
+      'X-Access-Key': opts.appName,
+      'AuthToken': opts.authToken,
+      'UserType': opts.userType || 'StandAlone'
+    }
+  });
+
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(`auth/validate failed (${res.status}): ${txt}`);
+  }
+
+  const body = await res.json();
+  return body.sessionToken || body.SessionToken || '';
+}
+
 function pickMimeType() {
   return MIME_PREFERENCES.find(m => MediaRecorder.isTypeSupported(m)) || '';
 }
@@ -158,14 +179,17 @@ async function uploadChunk(s, blob) {
   const seq = s.chunkSeq++;
   const mime = s.mimeType || 'video/mp4';
   try {
+    const headers = {
+      'Content-Type':         mime,
+      'Authorization':        `Bearer ${s.opts.token}`,
+      'X-Chunk-Sequence':     String(seq),
+      'X-Recording-MimeType': mime
+    };
+    if (s.opts.accessKey) headers['X-Access-Key'] = s.opts.accessKey;
+
     const r = await fetch(s.opts.chunkUrl, {
       method: 'POST',
-      headers: {
-        'Content-Type':         mime,
-        'Authorization':        `Bearer ${s.opts.token}`,
-        'X-Chunk-Sequence':     String(seq),
-        'X-Recording-MimeType': mime
-      },
+      headers,
       body: blob
     });
     if (r.ok) {
