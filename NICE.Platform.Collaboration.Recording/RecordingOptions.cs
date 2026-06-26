@@ -22,6 +22,23 @@ public sealed class RecordingOptions
     public string ApplicationId { get; set; } = string.Empty;
 
     /// <summary>
+    /// Application name/access key used by cross-app auth flows (for example, "Readi").
+    /// Passed on hub/chunk requests so server-side token bridge can resolve app context.
+    /// </summary>
+    public string? ApplicationName { get; set; }
+
+    /// <summary>
+    /// API key sent as <c>X-Api-Key</c> for validate-first auth flow.
+    /// </summary>
+    public string? ApiKey { get; set; }
+
+    /// <summary>
+    /// User type sent as <c>UserType</c> for validate-first auth flow.
+    /// Defaults to <c>StandAlone</c>.
+    /// </summary>
+    public string UserType { get; set; } = "StandAlone";
+
+    /// <summary>
     /// Optional <b>fallback</b> bearer token. Prefer passing the user-specific token
     /// at start time — <c>window.niceScreenRecording.start(userAccessToken)</c> (or
     /// <c>StandaloneRecorder.StartAsync(token)</c>) — since the token is per-user and
