@@ -119,9 +119,22 @@ public sealed class CollaborationHub(
         if (stale is not null) db.CurrentSessions.Remove(stale);
 
         // Single-session enforcement — evict duplicate connections
-        var duplicateSessions = await db.CurrentSessions
-            .Where(s => s.UserId == userId && s.SignalRConnectionId != connId)
-            .ToListAsync();
+        List<CollaborationCurrentSession> duplicateSessions;
+        if (CurrentUserType is "Supervisor" or "StandaloneMonitor")
+        {
+            // Supervisors/monitors can keep multiple live connections
+            // (e.g. monitor console + other app tabs/devices) without evicting
+            // active standalone recorder sessions tied to the same identity.
+            duplicateSessions = [];
+        }
+        else
+        {
+            duplicateSessions = await db.CurrentSessions
+                .Where(s => s.UserId == userId
+                         && s.UserType == CurrentUserType
+                         && s.SignalRConnectionId != connId)
+                .ToListAsync();
+        }
 
         foreach (var dup in duplicateSessions)
         {
@@ -177,6 +190,17 @@ public sealed class CollaborationHub(
         await Groups.AddToGroupAsync(connId, SignalRGroups.Application(appId));
         if (CurrentUserType is "StandaloneMonitor")
             await Groups.AddToGroupAsync(connId, SignalRGroups.StandaloneMonitor(appId));
+        else if (CurrentUserType is "Supervisor")
+        {
+            var appIds = await db.Applications
+                .AsNoTracking()
+                .Where(a => a.IsActive)
+                .Select(a => a.Id)
+                .ToListAsync();
+
+            foreach (var id in appIds)
+                await Groups.AddToGroupAsync(connId, SignalRGroups.StandaloneMonitor(id));
+        }
 
         // Push ICE config so client can initialise WebRTC immediately
         var iceConfig = await iceProvider.GetConfigAsync();
@@ -435,13 +459,16 @@ public sealed class CollaborationHub(
     public async Task GetStandaloneSessions()
     {
         var appId = CurrentApplicationId;
+        var isSupervisor = CurrentUserType is "Supervisor";
 
         // Materialise Guids first, then project with C# ToString() (always lowercase)
         // to avoid EF SQL CAST producing UPPERCASE UUIDs that don't match client-side comparisons.
         var rows = await db.CurrentSessions
             .AsNoTracking()
-            .Where(s => s.ApplicationId == appId
-                     && (s.UserType == "Standalone" || s.UserType == "StandAlone")
+            .Where(s => (isSupervisor || s.ApplicationId == appId)
+                     && (s.UserType == "Standalone"
+                      || s.UserType == "StandAlone"
+                      || s.UserType == "Supervisor")
                      && s.CurrentCollaborationId != null)
             .Join(db.Users,
                   s => s.UserId,
