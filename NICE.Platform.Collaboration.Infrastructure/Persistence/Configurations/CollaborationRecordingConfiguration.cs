@@ -28,8 +28,13 @@ public class CollaborationRecordingConfiguration : IEntityTypeConfiguration<Coll
         b.Property(e => e.StartedAt)
             .HasDefaultValueSql("GETUTCDATE()");
 
+        b.Property(e => e.IsDeleted)
+            .HasDefaultValue(false);
+
         b.HasIndex(e => e.CollaborationId);
         b.HasIndex(e => e.Status);
+        // Speeds up "active (non-deleted) recordings for a collaboration" lookups.
+        b.HasIndex(e => new { e.CollaborationId, e.IsDeleted });
 
         b.HasOne(e => e.CollaborationEntity)
             .WithMany(c => c.Recordings)

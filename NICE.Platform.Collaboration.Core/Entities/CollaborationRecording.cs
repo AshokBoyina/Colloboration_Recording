@@ -35,6 +35,16 @@ public class CollaborationRecording
     /// </summary>
     public string Status { get; set; } = "Pending";
 
+    // ── Soft delete ───────────────────────────────────────────────────────
+    /// <summary>True once the recording's media has been deleted from storage.</summary>
+    public bool IsDeleted { get; set; }
+
+    /// <summary>UTC timestamp when the recording was deleted.</summary>
+    public DateTime? DeletedAt { get; set; }
+
+    /// <summary>The user who deleted the recording (optional, for audit).</summary>
+    public Guid? DeletedByUserId { get; set; }
+
     // ── Navigation ────────────────────────────────────────────────────────
     public Collaboration CollaborationEntity { get; set; } = null!;
 }

@@ -14,7 +14,7 @@ public sealed class GetRecordingsByCollaborationQueryHandler(CollaborationDbCont
     {
         var recordings = await db.Recordings
             .AsNoTracking()
-            .Where(r => r.CollaborationId == request.CollaborationId)
+            .Where(r => r.CollaborationId == request.CollaborationId && !r.IsDeleted)
             .OrderBy(r => r.StartedAt)
             .ToListAsync(cancellationToken);
 

@@ -76,17 +76,29 @@ public class LocalDiskStorageService(IConfiguration config, ILogger<LocalDiskSto
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Resolves a blob path like "recordings/2024/abc.webm" to a full OS path.
-    /// Recording blobs start with "recordings/"; everything else goes to attachments.
+    /// Resolves a blob path like "recordings/2024/abc.mp4" to a full OS path.
+    /// Recording blobs start with "recordings/" and live under RecordingsPath; the
+    /// "recordings/" prefix is stripped so the path matches where the streaming store
+    /// writes files (RecordingsPath/&lt;date&gt;/&lt;id&gt;.mp4) — NOT RecordingsPath/recordings/…
+    /// Everything else goes to AttachmentsPath.
     /// </summary>
     private string ResolveFullPath(string blobPath)
     {
-        var rootPath = blobPath.StartsWith("recordings/", StringComparison.OrdinalIgnoreCase)
-            ? RecordingsPath
-            : AttachmentsPath;
+        string rootPath;
+        string relative;
+        if (blobPath.StartsWith("recordings/", StringComparison.OrdinalIgnoreCase))
+        {
+            rootPath = RecordingsPath;
+            relative = blobPath["recordings/".Length..];
+        }
+        else
+        {
+            rootPath = AttachmentsPath;
+            relative = blobPath;
+        }
 
         // Normalise separators and prevent path-traversal attacks.
-        var safeName = Path.GetFullPath(Path.Combine(rootPath, blobPath));
+        var safeName = Path.GetFullPath(Path.Combine(rootPath, relative));
         if (!safeName.StartsWith(Path.GetFullPath(rootPath), StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"Path traversal detected in blobPath: {blobPath}");
 

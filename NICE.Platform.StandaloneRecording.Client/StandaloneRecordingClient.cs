@@ -88,6 +88,31 @@ public sealed class StandaloneRecordingClient
         throw new InvalidOperationException("auth/validate response did not contain a session token.");
     }
 
+    // ── Delete recordings ─────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Deletes all saved recordings for a collaboration via
+    /// DELETE /api/v1/collaboration/recordings/by-collaboration/{collaborationId}.
+    /// Requires an internal session token (Authorization: Bearer). Returns the raw
+    /// JSON result body ({ deleted, skippedInProgress, alreadyDeleted, notes }).
+    /// </summary>
+    public async Task<string> DeleteRecordingsAsync(
+        Guid collaborationId, string sessionToken, CancellationToken ct = default)
+    {
+        using var req = new HttpRequestMessage(
+            HttpMethod.Delete,
+            $"api/v1/collaboration/recordings/by-collaboration/{collaborationId}");
+        req.Headers.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", sessionToken);
+
+        using var response = await _http.SendAsync(req, ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"Delete failed (HTTP {(int)response.StatusCode}): {body}");
+
+        return body;
+    }
+
     // ── Deep-link URL builders ────────────────────────────────────────────────
 
     /// <summary>

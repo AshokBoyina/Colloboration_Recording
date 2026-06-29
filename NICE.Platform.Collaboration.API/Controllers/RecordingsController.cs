@@ -7,6 +7,8 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using NICE.Platform.Collaboration.Application.Features.Recordings.Commands.DeleteRecordingsByCollaboration;
+using NICE.Platform.Collaboration.Application.Features.Recordings.Commands.PurgeRecordings;
 using NICE.Platform.Collaboration.Application.Features.Recordings.Commands.StartRecording;
 using NICE.Platform.Collaboration.Application.Features.Recordings.Commands.StopRecording;
 using NICE.Platform.Collaboration.Application.Features.Recordings.Queries.GetRecordingsByCollaboration;
@@ -30,6 +32,15 @@ public class RecordingsController(
         Guid.TryParse(User.FindFirstValue(ClaimTypes.NameIdentifier)
                    ?? User.FindFirstValue("sub"), out var id)
             ? id : Guid.Empty;
+
+    // Role can arrive as ClaimTypes.Role (long URI) or the short "role" claim,
+    // depending on JWT claim mapping — check both (same as the hubs do).
+    private string? CurrentRole =>
+        User.FindFirstValue(ClaimTypes.Role) ?? User.FindFirstValue("role");
+
+    private bool IsSupervisor() =>
+        string.Equals(CurrentRole, "Supervisor",        StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(CurrentRole, "StandaloneMonitor", StringComparison.OrdinalIgnoreCase);
 
     // ── Standard recording lifecycle ─────────────────────────────────────────
 
@@ -59,6 +70,39 @@ public class RecordingsController(
     {
         var result = await sender.Send(
             new GetRecordingsByCollaborationQuery(collaborationId), ct);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Deletes all saved recordings for a collaboration: removes the media from the
+    /// configured store (local disk or Azure Blob) and soft-deletes the recording rows.
+    /// In-progress recordings are skipped. Returns counts + notes.
+    /// </summary>
+    [HttpDelete("by-collaboration/{collaborationId:guid}")]
+    public async Task<IActionResult> DeleteByCollaboration(Guid collaborationId, CancellationToken ct)
+    {
+        var result = await sender.Send(
+            new DeleteRecordingsByCollaborationCommand(collaborationId, CallerId), ct);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Purges all recordings started on or before <paramref name="onOrBefore"/>: removes the
+    /// media (local disk or Azure Blob) and soft-deletes the rows. A bare date (e.g. 2026-06-01)
+    /// covers the whole of that day; a date+time is an exact UTC cutoff. In-progress recordings
+    /// are skipped. Returns counts + the resolved cutoff.
+    /// </summary>
+    /// <example>DELETE /api/v1/collaboration/recordings/purge?onOrBefore=2026-06-01</example>
+    [HttpDelete("purge")]
+    public async Task<IActionResult> Purge([FromQuery] DateTime onOrBefore, CancellationToken ct)
+    {
+        // Bulk destructive operation — supervisors only.
+        if (!IsSupervisor())
+            return StatusCode(StatusCodes.Status403Forbidden,
+                new { error = "Only supervisors can purge recordings." });
+
+        var result = await sender.Send(
+            new PurgeRecordingsCommand(onOrBefore, CallerId), ct);
         return Ok(result);
     }
 

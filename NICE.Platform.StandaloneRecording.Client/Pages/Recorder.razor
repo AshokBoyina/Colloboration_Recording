@@ -12,7 +12,9 @@
     <div><b>API base:</b> @_apiBase</div>
     <div><b>Application id:</b> @(_appId ?? "(resolving…)")</div>
     <div><b>Recording as:</b> @(string.IsNullOrWhiteSpace(_pastedToken) ? _userName : "(pasted token)")</div>
-    <div><b>Collaboration id (sent at start):</b> @_collabId</div>
+    <div><b>Collaboration id (screen recording):</b>
+        <code style="user-select:all;background:#05070f;padding:2px 6px;border-radius:4px">@_collabId</code>
+    </div>
     <div><b>JS bridge ready:</b> @_ready</div>
 </div>
 
@@ -42,6 +44,10 @@
             style="padding:9px 18px;border:1px solid #39456b;border-radius:6px;background:transparent;color:#cdd3e6;cursor:pointer">
         New collaboration id
     </button>
+    <button @onclick="DeleteRecordingAsync"
+            style="padding:9px 18px;border:0;border-radius:6px;background:#7a2531;color:#ffd9df;font-weight:700;cursor:pointer">
+        🗑 Delete recording
+    </button>
 </div>
 
 @* The package component. Empty ChildContent hides its default UI; we drive it via
@@ -61,6 +67,7 @@
     private string  _userName = "Recording User";
     private string  _pastedToken = "";
     private string  _collabId = Guid.NewGuid().ToString();
+    private string? _sessionToken;   // last resolved internal session token (for delete auth)
     private bool    _ready;
     private string  _log = "";
 
@@ -96,31 +103,8 @@
     {
         try
         {
-            // Resolve the token whose name the monitor will display:
-            //   • a pasted /demo/mint-token token wins, else
-            //   • mint one for the entered person's name.
-            string token;
-            if (!string.IsNullOrWhiteSpace(_pastedToken))
-            {
-                token = _pastedToken.Trim();
-                var who = $"{JwtClaim(token, "given_name")} {JwtClaim(token, "family_name")}".Trim();
-                Log($"using pasted token{(string.IsNullOrWhiteSpace(who) ? "" : $" for {who}")}");
-            }
-            else
-            {
-                token = await Client.GetOrMintTokenAsync(name: _userName, role: "StandAlone");
-                Log($"minted token for '{_userName}'");
-            }
-
-            // Validate-first: internal tokens (demo LOCAL_JWT / session tokens) carry a GUID
-            // 'app' claim and are used directly. An external token (e.g. READI) is exchanged
-            // for an internal session token via /auth/validate before recording.
-            if (!IsInternalToken(token))
-            {
-                Log("external token → exchanging for a session token via /auth/validate…");
-                token = await Client.ExchangeForSessionTokenAsync(token, "StandAlone");
-                Log("received internal session token");
-            }
+            var token = await ResolveSessionTokenAsync();
+            _sessionToken = token;
             _appId ??= JwtClaim(token, "app");
 
             await JS.InvokeVoidAsync("niceScreenRecording.start",
@@ -129,10 +113,54 @@
         catch (Exception ex) { Log($"start() threw: {ex.Message}"); }
     }
 
+    // Resolves an internal session token: a pasted token (exchanged via /auth/validate if it's
+    // an external READI token) or a freshly minted demo token for the entered person's name.
+    private async Task<string> ResolveSessionTokenAsync()
+    {
+        string token;
+        if (!string.IsNullOrWhiteSpace(_pastedToken))
+        {
+            token = _pastedToken.Trim();
+            var who = $"{JwtClaim(token, "given_name")} {JwtClaim(token, "family_name")}".Trim();
+            Log($"using pasted token{(string.IsNullOrWhiteSpace(who) ? "" : $" for {who}")}");
+        }
+        else
+        {
+            token = await Client.GetOrMintTokenAsync(name: _userName, role: "StandAlone");
+            Log($"minted token for '{_userName}'");
+        }
+
+        if (!IsInternalToken(token))
+        {
+            Log("external token → exchanging for a session token via /auth/validate…");
+            token = await Client.ExchangeForSessionTokenAsync(token, "StandAlone");
+            Log("received internal session token");
+        }
+        return token;
+    }
+
     private async Task StopAsync()
     {
         try { await JS.InvokeVoidAsync("niceScreenRecording.stop", "customer"); }
         catch (Exception ex) { Log($"stop() threw: {ex.Message}"); }
+    }
+
+    // Deletes the saved recording(s) for the current collaboration id (media + DB row).
+    private async Task DeleteRecordingAsync()
+    {
+        if (!Guid.TryParse(_collabId, out var collabGuid))
+        {
+            Log("delete: the collaboration id is not a valid GUID.");
+            return;
+        }
+        try
+        {
+            var token = _sessionToken ??= await ResolveSessionTokenAsync();
+            Log($"deleting recordings for collaboration {_collabId[..Math.Min(8, _collabId.Length)]}…");
+            var body = await Client.DeleteRecordingsAsync(collabGuid, token);
+            Log($"delete result: {body}");
+        }
+        catch (Exception ex) { Log($"delete failed: {ex.Message}"); }
     }
 
     private void NewCollabId()
