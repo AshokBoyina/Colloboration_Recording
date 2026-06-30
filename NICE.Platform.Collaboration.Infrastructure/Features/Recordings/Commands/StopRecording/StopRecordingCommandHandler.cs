@@ -26,7 +26,7 @@ public sealed class StopRecordingCommandHandler(
         recording.StoppedAt   = now;
         recording.DurationSeconds = (int)(now - recording.StartedAt).TotalSeconds;
         recording.BlobUri     = request.BlobPath;
-        recording.Status      = "Ready";
+        recording.Status      = "Completed";
 
         db.Recordings.Update(recording);
         await db.SaveChangesAsync(cancellationToken);
