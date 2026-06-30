@@ -38,7 +38,7 @@ public sealed class StartStandAloneRecordingCommandHandler(
                 ApplicationId  = request.ApplicationId,
                 ExternalUserId = null,              // no customer for StandAlone
                 Status         = "AgentHandling",
-                ChatMode       = "StandAlone",
+                ChatMode       = "ScreenRecording",
                 IsRecorded     = true,
                 CreatedAt      = now
             };
@@ -62,7 +62,7 @@ public sealed class StartStandAloneRecordingCommandHandler(
         {
             Id              = Guid.NewGuid(),
             CollaborationId = collab.Id,
-            RecordingType   = "Screen",
+            RecordingType   = "ScreenRecording",
             StartedAt       = now,
             Status          = "Recording"
         };
