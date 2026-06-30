@@ -235,7 +235,7 @@ public sealed class RecordingHub(
             recording.StoppedAt       = now;
             recording.DurationSeconds = (int)(now - recording.StartedAt).TotalSeconds;
             recording.FileSizeBytes   = fileSize;
-            recording.Status          = "Ready";
+            recording.Status          = "Completed";
             recording.BlobUri         = blobUri ?? recording.BlobUri;
             db.Recordings.Update(recording);
             await db.SaveChangesAsync();
