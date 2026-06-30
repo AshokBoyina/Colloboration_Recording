@@ -43,13 +43,17 @@ public sealed class StartCollaborationCommandHandler(
                     "Supply a fresh GUID or omit sessionId to let the server generate one.");
         }
 
+        var chatMode = string.IsNullOrWhiteSpace(request.ChatMode)
+            ? "Live"
+            : request.ChatMode.Trim();
+
         var collab = new Collaboration
         {
             Id             = collabId,
             ApplicationId  = request.ApplicationId,
             ExternalUserId = request.UserId,
             Status         = "Waiting",
-            ChatMode       = "Live",
+            ChatMode       = chatMode,
             IsScreenSharing = false,
             IsRecorded     = false,
             CreatedAt      = now
