@@ -387,7 +387,7 @@ public sealed class CollaborationHub(
         Guid collabGuid;
         try
         {
-            var result = await sender.Send(new StartCollaborationCommand(userId, null, appId, desiredId));
+            var result = await sender.Send(new StartCollaborationCommand(userId, null, appId, desiredId, "ScreenRecording"));
             collabGuid = result.Id;
         }
         catch (InvalidOperationException ex)
