@@ -6,29 +6,47 @@
 @using System.Text.Json
 
 @*
-    TEST ONLY (Test C) — exercises the NICE.Platform.Collaboration.Recording package.
-    Mints a StandAlone token, embeds <StandaloneRecorder/> (driven purely from JS),
-    and calls window.niceScreenRecording.start({ token, collaborationId }).
-    Remove this page (and the package reference / DI block) to decouple the Monitor UI.
+    TEST ONLY — self-contained recorder harness for the NICE.Platform.Collaboration.Recording
+    package, hosted inside the Monitor UI at its own URL (/recorder-test) so no separate
+    client app is needed. Drives <StandaloneRecorder/> through the window.niceScreenRecording
+    JS global (the real host call path), and also exercises delete + the secure monitor launch.
+
+    To decouple the Monitor console entirely: delete this page, the AddCollaborationRecording
+    block in Program.cs, the Recording ProjectReference, and the recording @using in _Imports.razor.
 *@
 
-<div style="max-width:720px;margin:32px auto;font-family:system-ui;padding:0 16px">
-    <h2>Recording package — test (Test C)</h2>
+<div style="max-width:780px;margin:28px auto;font-family:system-ui;padding:0 16px">
+    <h2 style="margin:0 0 12px">Screen recording — test harness</h2>
 
-    <div style="background:#f5f5f5;border-radius:8px;padding:12px 16px;margin:12px 0;font-size:.85rem">
+    <div style="background:#f5f5f5;border-radius:8px;padding:12px 16px;margin:12px 0;font-size:.85rem;line-height:1.7">
         <div><b>API base:</b> @_apiBase</div>
         <div><b>Application id:</b> @(_appId ?? "(resolving…)")</div>
-        <div><b>Access token:</b> @(_token is null ? "(minting…)" : _token[..Math.Min(24, _token.Length)] + "…")</div>
-        <div><b>Collaboration id (sent at start):</b> @_collabId</div>
+        <div><b>Recording as:</b> @(string.IsNullOrWhiteSpace(_pastedToken) ? _userName : "(pasted token)")</div>
+        <div><b>Collaboration id (screen recording):</b>
+            <code style="user-select:all;background:#eaeaea;padding:2px 6px;border-radius:4px">@_collabId</code>
+        </div>
         <div><b>JS bridge ready:</b> @_ready</div>
     </div>
 
-    <div style="display:flex;gap:8px;margin:12px 0">
-        <button @onclick="StartViaJs" disabled="@(!CanStart)"
+    <div style="display:flex;flex-direction:column;gap:10px;margin:12px 0">
+        <label style="font-size:.85rem">
+            Person sharing the screen (the name the monitor shows)
+            <input @bind="_userName" @bind:event="oninput" placeholder="Alice Smith"
+                   style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:6px;border:1px solid #ccc" />
+        </label>
+        <label style="font-size:.85rem;color:#666">
+            …or paste a token from <code>/api/v1/demo/mint-token</code> (optional — overrides the name)
+            <input @bind="_pastedToken" @bind:event="oninput" placeholder="eyJ…"
+                   style="display:block;width:100%;margin-top:4px;padding:8px;border-radius:6px;border:1px solid #ccc;font-family:monospace;font-size:.75rem" />
+        </label>
+    </div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin:14px 0">
+        <button @onclick="StartAsync" disabled="@(!CanStart)"
                 style="padding:8px 16px;border:0;border-radius:6px;background:#0a7;color:#fff;font-weight:600;cursor:pointer">
-            ● Start via JavaScript
+            ● Start recording
         </button>
-        <button @onclick="StopViaJs"
+        <button @onclick="StopAsync"
                 style="padding:8px 16px;border:0;border-radius:6px;background:#c33;color:#fff;font-weight:600;cursor:pointer">
             ■ Stop
         </button>
@@ -36,88 +54,211 @@
                 style="padding:8px 16px;border:1px solid #ccc;border-radius:6px;background:#fff;cursor:pointer">
             New collaboration id
         </button>
+        <button @onclick="DeleteRecordingAsync"
+                style="padding:8px 16px;border:0;border-radius:6px;background:#7a2531;color:#ffd9df;font-weight:600;cursor:pointer">
+            🗑 Delete recording
+        </button>
+        <button @onclick="LaunchMonitorAsync"
+                style="padding:8px 16px;border:0;border-radius:6px;background:#2b5cff;color:#fff;font-weight:600;cursor:pointer">
+            🖥 Open live monitor
+        </button>
     </div>
 
-    <!-- The recorder component. Empty ChildContent hides its default UI; we drive it
-         entirely through the JS global to exercise the real call path. -->
+    <!-- Empty ChildContent hides the component's default UI; we drive it via the JS global. -->
     <StandaloneRecorder Name="test" ApiBaseUrl="@_apiBase" ApplicationId="@_appId"
-                        OnStarted="HandleStarted"
-                        OnChunk="HandleChunk"
-                        OnStopped="HandleStopped"
-                        OnError="HandleError">
+                        OnStarted="HandleStarted" OnChunk="HandleChunk"
+                        OnStopped="HandleStopped" OnError="HandleError">
         <text></text>
     </StandaloneRecorder>
 
     <h4 style="margin-top:20px">Log</h4>
     <pre style="background:#111;color:#9f9;border-radius:8px;padding:12px;height:240px;overflow:auto;font-size:.8rem">@_log</pre>
-
-    <p style="color:#666;font-size:.8rem">
-        Record a few seconds, Stop, then open the newest file under your configured
-        <code>LocalStorage:RecordingsPath</code> and confirm it plays in Windows Media Player.
-    </p>
 </div>
 
 @code {
-    private string  _apiBase = "";
-    private string? _token;
+    private string  _apiBase      = "";
     private string? _appId;
-    private string  _collabId = Guid.NewGuid().ToString();
+    private string  _userName     = "Recording User";
+    private string  _pastedToken  = "";
+    private string  _collabId     = Guid.NewGuid().ToString();
+    private string? _sessionToken;   // last resolved internal token (for delete auth)
     private bool    _ready;
     private string  _log = "";
 
-    private bool CanStart => _token is not null && !string.IsNullOrEmpty(_appId);
+    private string ApiKey   => Config["RecordingApiKey"] ?? "chat-ui-key";
+    private string AppName  => Config["RecordingApplicationName"] ?? "Readi";
+
+    private bool CanStart => !string.IsNullOrEmpty(_appId);
 
     protected override async Task OnInitializedAsync()
     {
         _apiBase = (Config["ApiBaseUrl"] ?? Http.BaseAddress?.ToString() ?? "").TrimEnd('/');
         try
         {
-            // Mint a StandAlone token (auto-seeds the Readi app + user).
-            var resp = await Http.PostAsync("api/v1/demo/mint-token?name=Test+Recorder&role=StandAlone", null);
-            resp.EnsureSuccessStatusCode();
-            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
-            _token = doc.RootElement.GetProperty("token").GetString();
-            _appId = JwtClaim(_token!, "app");   // application GUID is the 'app' claim
-            Log($"token minted; app={_appId}");
+            // Mint a token once just to resolve the application id (same for every user).
+            var token = await MintTokenAsync(_userName, "StandAlone");
+            _appId = JwtClaim(token, "app");
+            Log($"ready — application id = {_appId}");
         }
         catch (Exception ex)
         {
-            Log($"Failed to mint token: {ex.Message}");
+            Log($"Failed to resolve application id: {ex.Message}");
         }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
-        // The component registers window.niceScreenRecording on its own first render.
-        _ready = await JS.InvokeAsync<bool>("niceScreenRecording.isReady", "test");
+        try { _ready = await JS.InvokeAsync<bool>("niceScreenRecording.isReady", "test"); }
+        catch { _ready = false; }
         StateHasChanged();
     }
 
-    private async Task StartViaJs()
+    private async Task StartAsync()
     {
         try
         {
+            var token = await ResolveSessionTokenAsync();
+            _sessionToken = token;
+            _appId ??= JwtClaim(token, "app");
+
             await JS.InvokeVoidAsync("niceScreenRecording.start",
-                new { token = _token, collaborationId = _collabId, name = "test" });
+                new { token, collaborationId = _collabId, name = "test" });
         }
         catch (Exception ex) { Log($"start() threw: {ex.Message}"); }
     }
 
-    private async Task StopViaJs()
+    // Resolves an internal session token: a pasted token (exchanged via /auth/validate if
+    // it's external) or a freshly minted demo token for the entered person's name.
+    private async Task<string> ResolveSessionTokenAsync()
+    {
+        string token;
+        if (!string.IsNullOrWhiteSpace(_pastedToken))
+        {
+            token = _pastedToken.Trim();
+            var who = $"{JwtClaim(token, "given_name")} {JwtClaim(token, "family_name")}".Trim();
+            Log($"using pasted token{(string.IsNullOrWhiteSpace(who) ? "" : $" for {who}")}");
+        }
+        else
+        {
+            token = await MintTokenAsync(_userName, "StandAlone");
+            Log($"minted token for '{_userName}'");
+        }
+
+        if (!IsInternalToken(token))
+        {
+            Log("external token → exchanging via /auth/validate…");
+            token = await ExchangeForSessionTokenAsync(token, "StandAlone");
+            Log("received internal session token");
+        }
+        return token;
+    }
+
+    private async Task StopAsync()
     {
         try { await JS.InvokeVoidAsync("niceScreenRecording.stop", "test"); }
         catch (Exception ex) { Log($"stop() threw: {ex.Message}"); }
     }
 
+    // Deletes the saved recording(s) for the current collaboration id (media + DB row).
+    private async Task DeleteRecordingAsync()
+    {
+        if (!Guid.TryParse(_collabId, out var collabGuid))
+        {
+            Log("delete: the collaboration id is not a valid GUID.");
+            return;
+        }
+        try
+        {
+            var token = _sessionToken ??= await ResolveSessionTokenAsync();
+            Log($"deleting recordings for collaboration {_collabId[..Math.Min(8, _collabId.Length)]}…");
+
+            using var req = new HttpRequestMessage(
+                HttpMethod.Delete,
+                $"api/v1/collaboration/recordings/by-collaboration/{collabGuid}");
+            req.Headers.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+            var resp = await Http.SendAsync(req);
+            var body = await resp.Content.ReadAsStringAsync();
+            Log(resp.IsSuccessStatusCode
+                ? $"delete result: {body}"
+                : $"delete failed (HTTP {(int)resp.StatusCode}): {body}");
+        }
+        catch (Exception ex) { Log($"delete failed: {ex.Message}"); }
+    }
+
+    // Securely launches the monitor in a new tab: mints a StandaloneMonitor token, exchanges
+    // it (in a header) for a one-time launch code, then opens …/launch?code=… — no token in URL.
+    private async Task LaunchMonitorAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("__niceLaunch.openPending");   // open the tab within the click gesture
+
+            Log("requesting secure monitor launch (no token in URL)…");
+            var token = await MintTokenAsync(_userName, "StandaloneMonitor");
+
+            using var req = new HttpRequestMessage(HttpMethod.Post, "api/v1/collaboration/monitor/handoff");
+            req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+            req.Headers.TryAddWithoutValidation("X-Access-Key", AppName);
+
+            var resp = await Http.SendAsync(req);
+            var body = await resp.Content.ReadAsStringAsync();
+            if (!resp.IsSuccessStatusCode) { Log($"handoff failed (HTTP {(int)resp.StatusCode}): {body}"); return; }
+
+            using var doc = JsonDocument.Parse(body);
+            var launchUrl = doc.RootElement.TryGetProperty("launchUrl", out var lu) ? lu.GetString() : null;
+            if (string.IsNullOrWhiteSpace(launchUrl)) { Log("handoff returned no launchUrl (set Monitor:BaseUrl)."); return; }
+
+            await JS.InvokeVoidAsync("__niceLaunch.go", launchUrl);
+            Log("opened monitor in a new tab via one-time code.");
+        }
+        catch (Exception ex) { Log($"launch monitor failed: {ex.Message}"); }
+    }
+
     private void NewCollabId() { _collabId = Guid.NewGuid().ToString(); Log($"new collaborationId: {_collabId}"); }
+
+    // ── HTTP helpers (inline — no separate client project needed) ────────────────
+    private async Task<string> MintTokenAsync(string name, string role)
+    {
+        var userName = string.IsNullOrWhiteSpace(name) ? "Recording User" : name.Trim();
+        if (!userName.Contains(' ')) userName += " User";   // LocalJwt needs given + family
+        var url = $"api/v1/demo/mint-token?name={Uri.EscapeDataString(userName)}&role={Uri.EscapeDataString(role)}";
+        var resp = await Http.PostAsync(url, null);
+        resp.EnsureSuccessStatusCode();
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        return doc.RootElement.GetProperty("token").GetString()
+               ?? throw new InvalidOperationException("mint-token response missing 'token'.");
+    }
+
+    private async Task<string> ExchangeForSessionTokenAsync(string externalToken, string userType)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Post, "api/v1/collaboration/auth/validate");
+        req.Headers.TryAddWithoutValidation("X-Api-Key",    ApiKey);
+        req.Headers.TryAddWithoutValidation("X-Access-Key", AppName);
+        req.Headers.TryAddWithoutValidation("AuthToken",    externalToken);
+        req.Headers.TryAddWithoutValidation("UserType",     userType);
+
+        var resp = await Http.SendAsync(req);
+        resp.EnsureSuccessStatusCode();
+        using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        var root = doc.RootElement;
+        foreach (var n in new[] { "sessionToken", "SessionToken" })
+            if (root.TryGetProperty(n, out var el) && el.ValueKind == JsonValueKind.String)
+                return el.GetString()!;
+        throw new InvalidOperationException("auth/validate response had no session token.");
+    }
+
+    // Internal/usable-directly tokens (demo LOCAL_JWT + session tokens) carry a GUID 'app' claim.
+    private static bool IsInternalToken(string token) => Guid.TryParse(JwtClaim(token, "app"), out _);
 
     // Recorder component event handlers
     private void HandleStarted(string mime) => Log($"started — mime: {mime}");
     private void HandleChunk(StandaloneRecorder.ChunkProgress c)
         => Log($"chunk #{c.Seq} — {c.ChunksSent} sent, {c.TotalBytes / 1024} KB");
     private void HandleStopped(StandaloneRecorder.RecordingResult r)
-        => Log($"stopped — {r.ChunksSent} chunks, {r.TotalBytes / 1024} KB. Check the file in RecordingsPath.");
+        => Log($"stopped — {r.ChunksSent} chunks, {r.TotalBytes / 1024} KB. File is in the API's RecordingsPath.");
     private void HandleError(string err) => Log($"ERROR: {err}");
 
     private void Log(string msg)
@@ -126,7 +267,7 @@
         StateHasChanged();
     }
 
-    // Decode a JWT claim (no signature check) — used to read the 'app' application id.
+    // Decode a JWT claim (no signature check).
     private static string? JwtClaim(string jwt, string name)
     {
         try

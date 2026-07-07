@@ -1,6 +1,5 @@
 @page "/login"
 @page "/"
-@page "/launch"
 @inject IAuthService Auth
 @inject NavigationManager Nav
 
@@ -118,33 +117,10 @@
     bool _isExternal  => _userType == "External";
     bool _isStandalone => _userType is "Standalone" or "StandaloneMonitor";
 
-    // ── Auto-submit when navigated here with query params (e.g. from ChatPlugin WinApp) ──
-    protected override async Task OnInitializedAsync()
-    {
-        // Parse query string manually — no external package needed in Blazor WASM.
-        var rawQuery = new Uri(Nav.Uri).Query.TrimStart('?');
-        if (string.IsNullOrEmpty(rawQuery)) return;
-
-        var qs = rawQuery
-            .Split('&', StringSplitOptions.RemoveEmptyEntries)
-            .Select(p => p.Split('=', 2))
-            .Where(p => p.Length == 2)
-            .ToDictionary(
-                p => Uri.UnescapeDataString(p[0]),
-                p => Uri.UnescapeDataString(p[1]),
-                StringComparer.OrdinalIgnoreCase);
-
-        if (!qs.TryGetValue("token", out var qToken) || string.IsNullOrWhiteSpace(qToken))
-            return;
-
-        _authToken = qToken;
-        if (qs.TryGetValue("role",   out var qRole)   && !string.IsNullOrWhiteSpace(qRole))   _userType        = qRole;
-        if (qs.TryGetValue("apiKey", out var qApiKey) && !string.IsNullOrWhiteSpace(qApiKey)) _apiKey          = qApiKey;
-        if (qs.TryGetValue("app",    out var qApp)    && !string.IsNullOrWhiteSpace(qApp))    _applicationName = qApp;
-
-        // Auto-login — user lands directly on the chat page, no form interaction needed.
-        await LoginAsync();
-    }
+    // NOTE: The old ?token=… query auto-login was removed — passing a JWT in a URL is
+    // insecure (it lands in history, logs, and Referer headers). Cross-app launch now
+    // goes through the secure one-time-code handoff at /launch (see Launch.razor and
+    // POST /api/v1/collaboration/monitor/handoff). This page is now manual sign-in only.
 
     string TokenPlaceholder => _isExternal
         ? "e.g. Troy M  or  Alice Smith  or  alice-smith  (or a full anonymous JWT)"

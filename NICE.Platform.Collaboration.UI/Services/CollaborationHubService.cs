@@ -84,7 +84,12 @@ public class CollaborationHubService(HttpClient http, IAuthService auth) : IColl
         _hub = new HubConnectionBuilder()
             .WithUrl(hubUrl, opts =>
             {
-                opts.AccessTokenProvider = () => Task.FromResult<string?>(auth.Current.Token);
+                // Never put the JWT in the hub URL. Mint a fresh, single-use, short-lived
+                // opaque ticket per request (SignalR calls this for negotiate AND the WS
+                // upgrade). OnMessageReceived on the server redeems it. Falls back to the
+                // JWT only if ticket minting fails (e.g. offline) so dev still works.
+                opts.AccessTokenProvider = async () =>
+                    await auth.GetHubTicketAsync() ?? auth.Current.Token;
             })
             .WithAutomaticReconnect()
             .Build();

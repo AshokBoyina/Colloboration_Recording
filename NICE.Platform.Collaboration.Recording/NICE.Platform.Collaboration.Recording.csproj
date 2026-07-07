@@ -16,8 +16,8 @@
     <PackageTags>NICE;blazor;screen-recording;mediarecorder;mp4;component;razor-class-library</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
     <!-- Still publishable as a NuGet package via `dotnet pack`, but not auto-packed.
-         The in-solution consumer (NICE.Platform.StandaloneRecording.Client) uses a
-         ProjectReference for development. -->
+         The in-solution consumer (NICE.Platform.Collaboration.UI, /recorder-test page)
+         uses a ProjectReference for development. -->
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
   </PropertyGroup>
   <ItemGroup>

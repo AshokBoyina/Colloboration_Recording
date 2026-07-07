@@ -115,6 +115,11 @@ if (builder.Configuration.GetValue<bool>("FeatureFlags:UseAzureSignalR"))
 builder.Services.AddScoped<ISignalRNotifier, SignalRNotifier>();
 builder.Services.AddScoped<SignalRAccessTokenBridge>();
 
+// ── One-time ticket store (Singleton) ────────────────────────────────────────
+// Backs both the launch handoff code and the SignalR hub ticket, keeping JWTs
+// out of every URL. See MonitorHandoffController + OnMessageReceived below.
+builder.Services.AddSingleton<IOneTimeTicketService, OneTimeTicketService>();
+
 // ── JWT bearer auth ────────────────────────────────────────────────────────
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
@@ -134,38 +139,60 @@ builder.Services
             ClockSkew                = TimeSpan.FromMinutes(2)
         };
 
-        // SignalR WebSocket connections pass the token as ?access_token=...
-        // If the incoming token is an external READI token, bridge it to an
-        // internal session JWT before normal JwtBearer validation.
+        // Hub authentication token resolution (only for /hubs paths):
+        //   • WebSocket transport supplies the token as ?access_token=...
+        //   • negotiate / SSE / long-polling supply it as an Authorization: Bearer header
+        // Preferred path is a one-time opaque HUB TICKET (see MonitorHandoffController),
+        // which we redeem here into a principal so no JWT ever appears in a URL.
+        // Falls back to the legacy behaviour: an internal session JWT is used directly,
+        // an external READI token is bridged to an internal session JWT.
         options.Events = new JwtBearerEvents
         {
             OnMessageReceived = async ctx =>
             {
+                if (!ctx.HttpContext.Request.Path.StartsWithSegments("/hubs"))
+                    return;
+
+                // Gather the candidate credential from query (WS) or header (negotiate).
                 var accessToken = ctx.Request.Query["access_token"].FirstOrDefault();
-                if (!string.IsNullOrWhiteSpace(accessToken) &&
-                    ctx.HttpContext.Request.Path.StartsWithSegments("/hubs"))
+                if (string.IsNullOrWhiteSpace(accessToken))
                 {
-                    var bridge = ctx.HttpContext.RequestServices
-                        .GetRequiredService<SignalRAccessTokenBridge>();
-
-                    if (bridge.IsInternalSessionToken(accessToken))
-                    {
-                        ctx.Token = accessToken;
-                        return;
-                    }
-
-                    var appName = ctx.Request.Query["applicationName"].FirstOrDefault()
-                                  ?? ctx.Request.Query["appName"].FirstOrDefault()
-                                  ?? ctx.Request.Query["accessKey"].FirstOrDefault()
-                                  ?? ctx.Request.Headers["X-Access-Key"].FirstOrDefault();
-
-                    var bridged = await bridge.TryExchangeAsync(
-                        accessToken, appName, ctx.HttpContext.RequestAborted);
-
-                    ctx.Token = string.IsNullOrWhiteSpace(bridged)
-                        ? accessToken
-                        : bridged;
+                    var authz = ctx.Request.Headers.Authorization.FirstOrDefault();
+                    if (authz is not null && authz.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
+                        accessToken = authz["Bearer ".Length..].Trim();
                 }
+                if (string.IsNullOrWhiteSpace(accessToken))
+                    return;
+
+                // 1) One-time hub ticket (opaque, single-use) → authenticate directly.
+                var tickets = ctx.HttpContext.RequestServices
+                    .GetRequiredService<IOneTimeTicketService>();
+                if (tickets.TryRedeemHubTicket(accessToken, out var principal) && principal is not null)
+                {
+                    ctx.Principal = principal;
+                    ctx.Success();
+                    return;
+                }
+
+                // 2) Legacy: internal session JWT used as-is; external READI token bridged.
+                var bridge = ctx.HttpContext.RequestServices
+                    .GetRequiredService<SignalRAccessTokenBridge>();
+
+                if (bridge.IsInternalSessionToken(accessToken))
+                {
+                    ctx.Token = accessToken;
+                    return;
+                }
+
+                var appName = ctx.Request.Query["applicationName"].FirstOrDefault()
+                              ?? ctx.Request.Query["appName"].FirstOrDefault()
+                              ?? ctx.Request.Query["accessKey"].FirstOrDefault()
+                              ?? ctx.Request.Headers["X-Access-Key"].FirstOrDefault();
+
+                var bridged = await bridge.TryExchangeAsync(
+                    accessToken, appName, ctx.HttpContext.RequestAborted);
+
+                ctx.Token = string.IsNullOrWhiteSpace(bridged) ? accessToken : bridged;
             }
         };
     });

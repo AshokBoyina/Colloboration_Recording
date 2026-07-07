@@ -27,6 +27,20 @@
         <a href="." class="reload">Reload</a>
         <span class="dismiss">🗙</span>
     </div>
+    <!-- Secure monitor launch helper. Opening a tab AFTER an await can be popup-blocked
+         (the click gesture is spent). Open a blank tab synchronously on click, then
+         redirect it to the one-time launch URL once the handoff returns. -->
+    <script>
+        window.__niceLaunch = {
+            _w: null,
+            openPending() { this._w = window.open('about:blank', '_blank'); return !!this._w; },
+            go(url) {
+                if (this._w && !this._w.closed) { this._w.location.href = url; }
+                else { window.open(url, '_blank'); }
+                this._w = null;
+            }
+        };
+    </script>
     <script src="_framework/blazor.webassembly.js"></script>
     <script src="js/chat.js"></script>
 </body>

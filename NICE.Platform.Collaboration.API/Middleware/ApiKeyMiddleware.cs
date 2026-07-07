@@ -34,6 +34,7 @@ public class ApiKeyMiddleware(RequestDelegate next, ILogger<ApiKeyMiddleware> lo
         if (path.StartsWithSegments("/swagger")                           ||
             path.StartsWithSegments("/api/v1/collaboration/auth")         ||
             path.StartsWithSegments("/api/v1/collaboration/recordings")   ||  // bearer-protected; browser can't easily add X-Api-Key
+            path.StartsWithSegments("/api/v1/collaboration/monitor")      ||  // handoff/redeem/hub-ticket — token in Authorization header, not X-Api-Key
             path.StartsWithSegments("/api/v1/demo")                       ||  // demo/setup — no key needed
             path.StartsWithSegments("/hubs")                              ||
             path.StartsWithSegments("/health"))

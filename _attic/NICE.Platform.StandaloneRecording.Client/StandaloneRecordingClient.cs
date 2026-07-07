@@ -113,6 +113,53 @@ public sealed class StandaloneRecordingClient
         return body;
     }
 
+    // ── Secure monitor launch (one-time code, JWT never in a URL) ──────────────
+
+    /// <summary>
+    /// Securely launches the standalone Monitor. Mints a StandaloneMonitor token, then
+    /// exchanges it — in an <c>Authorization: Bearer</c> header, never a URL — for a
+    /// short-lived, single-use launch code via
+    /// <c>POST /api/v1/collaboration/monitor/handoff</c>, and returns the resulting
+    /// launch URL (<c>…/launch?code=&lt;opaque&gt;</c>).
+    ///
+    /// Open the returned URL in a new browser tab (e.g. <c>window.open</c>). Only the
+    /// opaque, single-use code travels in the URL; the JWT is redeemed by the monitor
+    /// via a POST body and held in memory. This replaces the insecure
+    /// <see cref="BuildMonitorUrlAsync"/> (token-in-URL) path.
+    /// </summary>
+    /// <param name="name">Display name used when minting the monitor token.</param>
+    /// <param name="ct">Cancellation token.</param>
+    public async Task<string> CreateMonitorLaunchUrlAsync(
+        string? name = null, CancellationToken ct = default)
+    {
+        var token = await GetOrMintTokenAsync(name, "StandaloneMonitor", ct);
+
+        // The named HttpClient already sends X-Api-Key / X-Access-Key (used as the app name).
+        using var req = new HttpRequestMessage(HttpMethod.Post, "api/v1/collaboration/monitor/handoff");
+        req.Headers.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+        using var response = await _http.SendAsync(req, ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode)
+            throw new InvalidOperationException($"Monitor handoff failed (HTTP {(int)response.StatusCode}): {body}");
+
+        using var doc = JsonDocument.Parse(body);
+        var root = doc.RootElement;
+
+        if (root.TryGetProperty("launchUrl", out var lu) && lu.ValueKind == JsonValueKind.String &&
+            !string.IsNullOrWhiteSpace(lu.GetString()))
+            return lu.GetString()!;
+
+        // Server didn't have Monitor:BaseUrl configured — surface the code so the caller can build it.
+        var code = root.TryGetProperty("code", out var codeEl) ? codeEl.GetString() : null;
+        throw new InvalidOperationException(
+            code is null
+                ? "Monitor handoff response contained neither launchUrl nor code."
+                : $"Handoff returned a code but no launchUrl — set 'Monitor:BaseUrl' in the API " +
+                  $"appsettings, or open {{monitorBase}}/launch?code={code} yourself.");
+    }
+
     // ── Deep-link URL builders ────────────────────────────────────────────────
 
     /// <summary>

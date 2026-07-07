@@ -1,0 +1,82 @@
+@page "/launch"
+@layout BlankLayout
+@inject IAuthService Auth
+@inject NavigationManager Nav
+
+@*
+    Secure cross-tab launch target. A host app opens this page in a new tab with a
+    one-time, single-use opaque code:  /launch?code=<opaque>
+
+    The code (never a JWT) is redeemed once for the session token, which is held in
+    memory only. On success we replace the history entry so the code disappears from
+    the address bar, then land on the live monitor. No login form, no token in a URL.
+*@
+
+<PageTitle>Opening monitor…</PageTitle>
+
+<div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0b1020;color:#e8eaf0;font-family:system-ui,Segoe UI,sans-serif">
+    <div style="text-align:center;max-width:420px;padding:24px">
+        @if (_failed)
+        {
+            <div style="font-size:2rem;margin-bottom:10px">⚠️</div>
+            <div style="font-weight:600;margin-bottom:6px">Couldn't open the monitor</div>
+            <div style="color:#9aa4c4;font-size:.9rem">@_status</div>
+        }
+        else
+        {
+            <div style="width:34px;height:34px;border:3px solid rgba(255,255,255,.25);border-top-color:#4f8cff;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 14px"></div>
+            <div style="color:#cdd3e6">@_status</div>
+        }
+    </div>
+</div>
+
+<style>
+    @@keyframes spin { to { transform: rotate(360deg); } }
+</style>
+
+@code {
+    private string _status = "Signing you in…";
+    private bool   _failed;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var code = ReadQuery("code");
+        if (string.IsNullOrWhiteSpace(code))
+        {
+            Fail("No launch code was provided. Please start from your application.");
+            return;
+        }
+
+        var result = await Auth.RedeemHandoffAsync(code);
+        if (result.Success)
+        {
+            // Replace history so the (already-consumed) code leaves the address bar.
+            Nav.NavigateTo("/standalone-monitor", replace: true);
+        }
+        else
+        {
+            Fail(result.Error ?? "The launch code was invalid, expired, or already used.");
+        }
+    }
+
+    private void Fail(string message)
+    {
+        _failed = true;
+        _status = message;
+        StateHasChanged();
+    }
+
+    // Minimal query parser — no external package needed in Blazor WASM.
+    private string? ReadQuery(string key)
+    {
+        var q = new Uri(Nav.Uri).Query.TrimStart('?');
+        if (string.IsNullOrEmpty(q)) return null;
+        foreach (var pair in q.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var kv = pair.Split('=', 2);
+            if (kv.Length == 2 && string.Equals(Uri.UnescapeDataString(kv[0]), key, StringComparison.OrdinalIgnoreCase))
+                return Uri.UnescapeDataString(kv[1]);
+        }
+        return null;
+    }
+}

@@ -1,3 +1,5 @@
+using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Text.Json;
 using NICE.Platform.Collaboration.UI.Models;
 using Microsoft.JSInterop;
@@ -93,6 +95,87 @@ public class AuthService(HttpClient http, IJSRuntime js) : IAuthService
         catch (Exception ex)
         {
             return new LoginResponse { Error = ex.Message };
+        }
+    }
+
+    public async Task<LoginResponse> RedeemHandoffAsync(string code, CancellationToken ct = default)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(
+                HttpMethod.Post, "api/v1/collaboration/monitor/handoff/redeem")
+            {
+                Content = JsonContent.Create(new { code })
+            };
+
+            var resp = await http.SendAsync(req, ct);
+            var json = await resp.Content.ReadAsStringAsync(ct);
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                string errorMsg;
+                try
+                {
+                    var errDoc = JsonSerializer.Deserialize<JsonElement>(json, JsonOpts);
+                    errorMsg = errDoc.TryGetProperty("error", out var e) ? e.GetString() ?? json : json;
+                }
+                catch { errorMsg = json; }
+                return new LoginResponse { Error = $"Launch failed (HTTP {(int)resp.StatusCode}): {errorMsg}" };
+            }
+
+            var doc          = JsonSerializer.Deserialize<JsonElement>(json, JsonOpts);
+            var sessionToken = doc.TryGetProperty("sessionToken", out var tp) ? tp.GetString() : null;
+            if (string.IsNullOrEmpty(sessionToken))
+                return new LoginResponse { Error = "Launch redeem returned no session token." };
+
+            var user = doc.TryGetProperty("user", out var up) ? up : default;
+
+            // In-memory only — do NOT persist to local storage (security decision).
+            _current = new UserSession
+            {
+                Token           = sessionToken,
+                UserId          = Str(user, "userId")          ?? string.Empty,
+                DisplayName     = Str(user, "displayName")     ?? string.Empty,
+                UserType        = Str(user, "userType")        ?? "StandaloneMonitor",
+                ApplicationId   = Str(user, "applicationId")   ?? string.Empty,
+                ApplicationName = Str(user, "applicationName") ?? string.Empty
+            };
+            OnChange?.Invoke();
+
+            return new LoginResponse
+            {
+                Success     = true,
+                Token       = sessionToken,
+                UserId      = _current.UserId,
+                DisplayName = _current.DisplayName,
+                UserType    = _current.UserType
+            };
+        }
+        catch (Exception ex)
+        {
+            return new LoginResponse { Error = ex.Message };
+        }
+    }
+
+    public async Task<string?> GetHubTicketAsync(CancellationToken ct = default)
+    {
+        if (string.IsNullOrEmpty(_current.Token)) return null;
+        try
+        {
+            using var req = new HttpRequestMessage(
+                HttpMethod.Post, "api/v1/collaboration/monitor/hub-ticket");
+            req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", _current.Token);
+
+            var resp = await http.SendAsync(req, ct);
+            if (!resp.IsSuccessStatusCode) return null;
+
+            var json = await resp.Content.ReadAsStringAsync(ct);
+            var doc  = JsonSerializer.Deserialize<JsonElement>(json, JsonOpts);
+            return doc.TryGetProperty("ticket", out var tp) ? tp.GetString() : null;
+        }
+        catch
+        {
+            return null;
         }
     }
 

@@ -18,6 +18,21 @@
     <!-- The recording component imports its JS module on demand from
          _content/NICE.Platform.Collaboration.Recording/recorder.js (shipped in the NuGet
          package's static web assets), so no extra script tag is needed here. -->
+
+    <!-- Secure monitor launch helper. Opening a tab AFTER an await can be blocked by
+         popup blockers (the user gesture is "spent"). So we open a blank tab synchronously
+         on click, then redirect it to the one-time launch URL once the handoff returns. -->
+    <script>
+        window.__niceLaunch = {
+            _w: null,
+            openPending() { this._w = window.open('about:blank', '_blank'); return !!this._w; },
+            go(url) {
+                if (this._w && !this._w.closed) { this._w.location.href = url; }
+                else { window.open(url, '_blank'); }   // fallback if the blank tab was blocked/closed
+                this._w = null;
+            }
+        };
+    </script>
     <script src="_framework/blazor.webassembly.js"></script>
 </body>
 </html>

@@ -48,6 +48,10 @@
             style="padding:9px 18px;border:0;border-radius:6px;background:#7a2531;color:#ffd9df;font-weight:700;cursor:pointer">
         🗑 Delete recording
     </button>
+    <button @onclick="LaunchMonitorAsync"
+            style="padding:9px 18px;border:0;border-radius:6px;background:#2b5cff;color:#fff;font-weight:700;cursor:pointer">
+        🖥 Open live monitor
+    </button>
 </div>
 
 @* The package component. Empty ChildContent hides its default UI; we drive it via
@@ -167,6 +171,27 @@
     {
         _collabId = Guid.NewGuid().ToString();
         Log($"new collaborationId: {_collabId}");
+    }
+
+    // Securely launches the monitor in a new tab. The supervisor JWT is exchanged for a
+    // one-time launch code (in an Authorization header) BEFORE the tab opens, so only the
+    // opaque code — never the token — appears in the URL.
+    private async Task LaunchMonitorAsync()
+    {
+        try
+        {
+            // Open a blank tab synchronously (within the click gesture) so the popup
+            // isn't blocked after the async handoff below.
+            await JS.InvokeVoidAsync("__niceLaunch.openPending");
+
+            Log("requesting secure monitor launch (no token in URL)…");
+            var url = await Client.CreateMonitorLaunchUrlAsync(name: _userName);
+
+            // Redirect the already-open blank tab to the one-time launch URL.
+            await JS.InvokeVoidAsync("__niceLaunch.go", url);
+            Log("opened monitor in a new tab via one-time code.");
+        }
+        catch (Exception ex) { Log($"launch monitor failed: {ex.Message}"); }
     }
 
     private void HandleStarted(string mime) => Log($"started — mime: {mime}");
