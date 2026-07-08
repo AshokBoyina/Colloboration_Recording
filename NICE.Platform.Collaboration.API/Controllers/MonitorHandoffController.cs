@@ -32,7 +32,9 @@ public sealed class MonitorHandoffController(
     IConfiguration                    configuration,
     ILogger<MonitorHandoffController> logger) : ControllerBase
 {
-    private static readonly TimeSpan HandoffTtl   = TimeSpan.FromSeconds(60);
+    // 5 min so manual testing (Postman → browser copy/paste) is comfortable; the code is
+    // single-use, so a longer window is still safe. The button flow redeems in < 1 s.
+    private static readonly TimeSpan HandoffTtl   = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan HubTicketTtl = TimeSpan.FromMinutes(2);
 
     /// <summary>
@@ -51,7 +53,16 @@ public sealed class MonitorHandoffController(
         var appName = Request.Headers["X-Access-Key"].FirstOrDefault()
                       ?? Request.Query["app"].FirstOrDefault();
 
-        // Internal session JWT → use directly; external READI token → exchange (runs ReadiAuthValidator).
+        // The monitor console only receives live sessions when its session role is
+        // "StandaloneMonitor" (see CollaborationHub.OnConnectedAsync). Callers may override
+        // to "Supervisor" via a UserType header/query if they want cross-app watching.
+        var userType = Request.Headers["UserType"].FirstOrDefault()
+                       ?? Request.Query["userType"].FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(userType)) userType = "StandaloneMonitor";
+
+        // Internal session JWT → use directly; external READI token → validate (runs
+        // ReadiAuthValidator) and issue a StandaloneMonitor session. requireValidation:true
+        // rejects an invalid token instead of falling back — real auth for a supervisor session.
         string sessionToken;
         if (bridge.IsInternalSessionToken(token))
         {
@@ -59,9 +70,10 @@ public sealed class MonitorHandoffController(
         }
         else
         {
-            var exchanged = await bridge.TryExchangeAsync(token, appName, ct);
+            var exchanged = await bridge.TryExchangeAsync(
+                token, appName, ct, userTypeOverride: userType, requireValidation: true);
             if (string.IsNullOrWhiteSpace(exchanged))
-                return Unauthorized(new { error = "Supervisor token could not be validated." });
+                return Unauthorized(new { error = "READI token could not be validated." });
             sessionToken = exchanged;
         }
 
@@ -87,10 +99,13 @@ public sealed class MonitorHandoffController(
 
         var code = tickets.CreateHandoff(payload, HandoffTtl);
 
+        // Route through the app ROOT (/?code=) rather than a deep path (/launch?code=):
+        // "/" always serves index.html as the default document, so the launch works even
+        // where SPA deep-link fallback isn't configured. Login.razor redeems the code at root.
         var monitorBase = (configuration["Monitor:BaseUrl"] ?? string.Empty).TrimEnd('/');
         var launchUrl   = string.IsNullOrEmpty(monitorBase)
             ? null
-            : $"{monitorBase}/launch?code={Uri.EscapeDataString(code)}";
+            : $"{monitorBase}/?code={Uri.EscapeDataString(code)}";
 
         logger.LogInformation(
             "Monitor handoff minted for user {UserId} (app '{App}'), expires in {Ttl}s.",

@@ -595,8 +595,8 @@ public class DemoController(CollaborationDbContext db, IConfiguration config) : 
         if (file is null || file.Length == 0)
             return BadRequest(new { error = "No file received." });
 
-        // Read path from appsettings.json → LocalStorage:RecordingsPath
-        var recordingsRoot = config["LocalStorage:RecordingsPath"]
+        // Read path from appsettings.json → RecordingStorage:RecordingsPath
+        var recordingsRoot = config["RecordingStorage:RecordingsPath"]
                              ?? Path.Combine(AppContext.BaseDirectory, "Recordings");
         var dateFolder = DateTime.UtcNow.ToString("yyyy-MM-dd");
         var saveDir    = Path.Combine(recordingsRoot, dateFolder);

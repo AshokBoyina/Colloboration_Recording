@@ -8,9 +8,9 @@ using NICE.Platform.Collaboration.Application.Interfaces.Services;
 using NICE.Platform.Collaboration.Infrastructure.Persistence;
 
 /// <summary>
-/// Deletes recording media via <see cref="IBlobStorageService"/> — which is wired to
-/// LocalDiskStorageService or AzureBlobStorageService by FeatureFlags:UseAzureBlob — so
-/// the same call works for both stores. Rows are soft-deleted (IsDeleted/DeletedAt) for audit.
+/// Deletes recording media via <see cref="IBlobStorageService"/> — wired to
+/// RecordingStorageService (the RecordingStorage file system: local folder or UNC share).
+/// Rows are soft-deleted (IsDeleted/DeletedAt) for audit.
 /// </summary>
 public sealed class DeleteRecordingsByCollaborationCommandHandler(
     CollaborationDbContext db,

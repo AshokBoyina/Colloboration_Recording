@@ -201,8 +201,8 @@ public class RecordingsController(
 
             // BlobUri is "recordings/<date>/<id>.<ext>" — resolve against the configured root.
             var recordingsRoot = HttpContext.RequestServices
-                .GetRequiredService<IConfiguration>()["LocalStorage:RecordingsPath"]
-                ?? System.IO.Path.Combine(AppContext.BaseDirectory, "LocalStorage", "Recordings");
+                .GetRequiredService<IConfiguration>()["RecordingStorage:RecordingsPath"]
+                ?? System.IO.Path.Combine(AppContext.BaseDirectory, "RecordingStorage", "Recordings");
 
             // Strip the leading "recordings/" prefix that BlobUri carries by convention.
             var relativePart = rec.BlobUri.StartsWith("recordings/", StringComparison.OrdinalIgnoreCase)
@@ -257,7 +257,7 @@ public class RecordingsController(
         if (file is null || file.Length == 0)
             return BadRequest(new { error = "No file received." });
 
-        var recordingsRoot = config["LocalStorage:RecordingsPath"]
+        var recordingsRoot = config["RecordingStorage:RecordingsPath"]
                              ?? Path.Combine(AppContext.BaseDirectory, "Recordings");
         var dateFolder = DateTime.UtcNow.ToString("yyyy-MM-dd");
         var saveDir    = Path.Combine(recordingsRoot, dateFolder);

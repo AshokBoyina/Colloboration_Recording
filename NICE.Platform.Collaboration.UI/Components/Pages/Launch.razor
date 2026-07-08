@@ -4,38 +4,24 @@
 @inject NavigationManager Nav
 
 @*
-    Secure cross-tab launch target. A host app opens this page in a new tab with a
-    one-time, single-use opaque code:  /launch?code=<opaque>
-
-    The code (never a JWT) is redeemed once for the session token, which is held in
-    memory only. On success we replace the history entry so the code disappears from
-    the address bar, then land on the live monitor. No login form, no token in a URL.
+    Secure cross-tab launch target: /launch?code=<one-time opaque code>.
+    Redeems the code (never a JWT) once for the session token (held in memory),
+    replaces history so the code leaves the address bar, then opens the monitor.
+    No default layout dependency — this page establishes its own session.
 *@
 
 <PageTitle>Opening monitor…</PageTitle>
 
 <div style="min-height:100vh;display:flex;align-items:center;justify-content:center;background:#0b1020;color:#e8eaf0;font-family:system-ui,Segoe UI,sans-serif">
-    <div style="text-align:center;max-width:420px;padding:24px">
-        @if (_failed)
-        {
-            <div style="font-size:2rem;margin-bottom:10px">⚠️</div>
-            <div style="font-weight:600;margin-bottom:6px">Couldn't open the monitor</div>
-            <div style="color:#9aa4c4;font-size:.9rem">@_status</div>
-        }
-        else
-        {
-            <div style="width:34px;height:34px;border:3px solid rgba(255,255,255,.25);border-top-color:#4f8cff;border-radius:50%;animation:spin .8s linear infinite;margin:0 auto 14px"></div>
-            <div style="color:#cdd3e6">@_status</div>
-        }
+    <div style="text-align:center;max-width:460px;padding:24px">
+        <div style="font-size:1.6rem;margin-bottom:10px">@(_failed ? "⚠️" : "🖥")</div>
+        <div style="font-weight:600;margin-bottom:6px">@(_failed ? "Couldn't open the monitor" : "Opening the live monitor…")</div>
+        <div style="color:#9aa4c4;font-size:.9rem">@_status</div>
     </div>
 </div>
 
-<style>
-    @@keyframes spin { to { transform: rotate(360deg); } }
-</style>
-
 @code {
-    private string _status = "Signing you in…";
+    private string _status = "Verifying your secure launch code…";
     private bool   _failed;
 
     protected override async Task OnInitializedAsync()
@@ -43,19 +29,25 @@
         var code = ReadQuery("code");
         if (string.IsNullOrWhiteSpace(code))
         {
-            Fail("No launch code was provided. Please start from your application.");
+            Fail("No launch code was provided. Start from your application's ‘Open live monitor’ button.");
             return;
         }
 
-        var result = await Auth.RedeemHandoffAsync(code);
-        if (result.Success)
+        try
         {
-            // Replace history so the (already-consumed) code leaves the address bar.
-            Nav.NavigateTo("/standalone-monitor", replace: true);
+            var result = await Auth.RedeemHandoffAsync(code);
+            if (result.Success)
+            {
+                Nav.NavigateTo("/standalone-monitor", replace: true);
+            }
+            else
+            {
+                Fail(result.Error ?? "The launch code was invalid, expired, or already used.");
+            }
         }
-        else
+        catch (Exception ex)
         {
-            Fail(result.Error ?? "The launch code was invalid, expired, or already used.");
+            Fail($"Launch error: {ex.Message}");
         }
     }
 

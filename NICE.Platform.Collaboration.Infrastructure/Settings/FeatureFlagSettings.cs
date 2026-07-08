@@ -22,11 +22,8 @@ public class FeatureFlagSettings
     /// </summary>
     public bool UseAzureSignalR { get; set; }
 
-    /// <summary>
-    /// When <c>true</c>, recordings and attachments are stored in Azure Blob Storage.
-    /// When <c>false</c>, files are written to local disk paths configured in <c>LocalStorage</c>.
-    /// </summary>
-    public bool UseAzureBlob { get; set; }
+    // Recording storage is always the local/network file system (RecordingStorage:*).
+    // Azure Blob has been removed; there is no storage feature flag.
 
     /// <summary>
     /// When <c>true</c>, a dedicated TURN server is used for WebRTC relay

@@ -8,9 +8,9 @@ using NICE.Platform.Collaboration.Application.Interfaces.Services;
 using NICE.Platform.Collaboration.Infrastructure.Persistence;
 
 /// <summary>
-/// Deletes the media (via IBlobStorageService — local disk or Azure Blob depending on
-/// FeatureFlags:UseAzureBlob) and soft-deletes the rows for every recording started on or
-/// before the cutoff. In-progress recordings are skipped.
+/// Deletes the media (via IBlobStorageService — the RecordingStorage file system) and
+/// soft-deletes the rows for every recording started on or before the cutoff.
+/// In-progress recordings are skipped.
 /// </summary>
 public sealed class PurgeRecordingsCommandHandler(
     CollaborationDbContext db,

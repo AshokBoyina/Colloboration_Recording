@@ -43,7 +43,7 @@ public sealed class StartRecordingCommandHandler(
         await db.SaveChangesAsync(cancellationToken);
 
         // ── Open the file stream NOW so chunk uploads don't get dropped ────────
-        // LocalDiskStreamStore keeps a FileStream open per recordingId.
+        // RecordingStreamStore keeps a FileStream open per recordingId.
         // If InitAsync is not called before the first chunk arrives, AppendChunkAsync
         // finds no entry in _streams and silently discards the data.
         try

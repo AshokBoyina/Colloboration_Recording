@@ -6,11 +6,12 @@ using Microsoft.Extensions.Logging;
 using NICE.Platform.Collaboration.Application.Interfaces.Services;
 
 /// <summary>
-/// Streams recording chunks to the local disk in real-time.
-/// Each recording gets its own FileStream kept open during the session.
+/// Streams recording chunks to the recording storage file system in real-time
+/// (a local folder or a UNC network share). Each recording gets its own FileStream
+/// kept open during the session.
 ///
 /// Files are written to:
-///   LocalStorage:RecordingsPath / yyyy-MM-dd / {recordingId}.mp4
+///   RecordingStorage:RecordingsPath / yyyy-MM-dd / {recordingId}.mp4
 ///
 /// Fragmented MP4 is the default container because <c>video/mp4</c> produced
 /// by the browser's MediaRecorder is inherently seekable (each fragment carries
@@ -41,13 +42,13 @@ using NICE.Platform.Collaboration.Application.Interfaces.Services;
 /// The full path is stored in <c>_paths</c> so GetLocalPath remains correct
 /// even when a recording spans midnight into a new date folder.
 /// </summary>
-public sealed class LocalDiskStreamStore(
+public sealed class RecordingStreamStore(
     IConfiguration                config,
-    ILogger<LocalDiskStreamStore> logger) : IRecordingStreamStore, IAsyncDisposable
+    ILogger<RecordingStreamStore> logger) : IRecordingStreamStore, IAsyncDisposable
 {
     private string RootPath =>
-        config["LocalStorage:RecordingsPath"]
-        ?? Path.Combine(AppContext.BaseDirectory, "LocalStorage", "Recordings");
+        config["RecordingStorage:RecordingsPath"]
+        ?? Path.Combine(AppContext.BaseDirectory, "RecordingStorage", "Recordings");
 
     // Open file streams keyed by recordingId
     private readonly ConcurrentDictionary<Guid, FileStream> _streams = new();

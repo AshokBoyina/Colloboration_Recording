@@ -75,20 +75,11 @@ public static class DependencyInjection
         // ── In-memory recording session tracker ───────────────────────────────
         services.AddSingleton<IRecordingSessionTracker, RecordingSessionTracker>();
 
-        // ── Storage — local disk OR Azure Blob (FeatureFlags:UseAzureBlob) ────
-        if (flags.UseAzureBlob)
-        {
-            // AzureBlobStreamStore composes LocalDiskStreamStore (chunk append + fMP4
-            // de-fragmentation) and uploads the finalized MP4 to Azure on finalize.
-            services.AddSingleton<LocalDiskStreamStore>();
-            services.AddSingleton<IBlobStorageService, AzureBlobStorageService>();
-            services.AddSingleton<IRecordingStreamStore, AzureBlobStreamStore>();
-        }
-        else
-        {
-            services.AddScoped<IBlobStorageService, LocalDiskStorageService>();
-            services.AddSingleton<IRecordingStreamStore, LocalDiskStreamStore>();
-        }
+        // ── Recording storage — local/network file system ────────────────────
+        // Recordings + attachments are written to the path in RecordingStorage:*
+        // (a local folder or a UNC network share, e.g. \\fileserver\share\recordings).
+        services.AddScoped<IBlobStorageService, RecordingStorageService>();
+        services.AddSingleton<IRecordingStreamStore, RecordingStreamStore>();
 
         // ── ICE / STUN for WebRTC ─────────────────────────────────────────────
         if (flags.UseCustomTurn)

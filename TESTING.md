@@ -56,8 +56,8 @@ the 415 fix, the upload-drain fix, and the fMP4 → progressive de-fragmentation
 3. Click **Start**, share a screen/window, record **5–10 seconds with visible motion**,
    click **Stop**. Watch the "Chunks: N | … KB" counter climb past the first chunk —
    there should be **no `Chunk N failed (415)`** lines.
-4. Open the saved file from the configured `LocalStorage:RecordingsPath`
-   (default `C:\Readi\Recordings\<yyyy-MM-dd>\<recordingId>.mp4`):
+4. Open the saved file from the configured `RecordingStorage:RecordingsPath`
+   (a local folder or UNC share, e.g. `\\fileserver\share\recordings\<yyyy-MM-dd>\<recordingId>.mp4`):
    - File size is well past 0 bytes (hundreds of KB+).
    - **It plays in Windows Media Player** with correct duration and seeking.
 
@@ -166,41 +166,29 @@ External users still route to ANON.
 Put test values in **appsettings.Development.json** so the prod baseline stays clean
 (Development overrides win when you `dotnet run`).
 
-### E1 — `UseAzureBlob` with the Azurite emulator (no Azure account needed)
+### E1 — Recording storage on a network drive (UNC share)
 
-1. Install + start Azurite (local Azure Storage emulator):
-   ```powershell
-   npm install -g azurite
-   azurite --silent --location ./azurite-data       # blob endpoint http://127.0.0.1:10000
-   ```
-   (or Docker: `docker run -p 10000:10000 mcr.microsoft.com/azure-storage/azurite`; it also
-   ships with Visual Studio.)
-2. In `NICE.Platform.Collaboration.API/appsettings.Development.json`:
+Azure Blob has been removed. Recordings are always written to `RecordingStorage:RecordingsPath`,
+which can be a local folder or a UNC network share.
+
+1. In `NICE.Platform.Collaboration.API/appsettings.Development.json`, point storage at the share
+   (JSON-escape each backslash):
    ```jsonc
    {
-     "FeatureFlags": { "UseAzureBlob": true },
-     "Azure": { "Blob": { "ConnectionString": "UseDevelopmentStorage=true", "Container": "collaboration" } }
+     "RecordingStorage": {
+       "RecordingsPath":  "\\\\fileserver\\share\\recordings",
+       "AttachmentsPath": "\\\\fileserver\\share\\attachments"
+     }
    }
    ```
-3. `dotnet run --project NICE.Platform.Collaboration.API` — startup must NOT throw
-   (a bad/empty connection string fails fast).
-4. Record a clip (recorder.html or the 5300 client) and **Stop**.
-5. Verify in the API log: `AzureBlobStreamStore: uploaded recordings/<date>/<id>.mp4 (... bytes) to Azure Blob`.
-6. Verify the blob exists and plays:
-   ```powershell
-   az storage blob list --container-name collaboration --connection-string "UseDevelopmentStorage=true" -o table
-   ```
-   (or use Azure Storage Explorer → "Local & Attached" → Storage Accounts → Emulator →
-   Blob Containers → collaboration → `recordings/<date>/<id>.mp4` → Download → plays in WMP.)
-7. Verify the **local scratch file is gone** (the file under `LocalStorage:RecordingsPath` was
-   deleted after upload — Azure is now the durable store).
-8. Verify SAS playback: `GET /api/v1/collaboration/recordings/{id}/sas-url` → returns an
-   emulator blob URL with a SAS token → open it in the browser → the MP4 downloads/plays.
+   The account the API runs under must have read/write access to the share. Prefer the full UNC
+   path over a mapped drive letter (mapped drives are per-user and unreliable for a service).
+2. `dotnet run --project NICE.Platform.Collaboration.API` and record a clip via `/recorder-test`, then **Stop**.
+3. Verify in the API log: `RecordingStorage: saved recordings/<date>/<id>.mp4 (... bytes)` (on delete/upload paths).
+4. On the share, confirm `\\fileserver\share\recordings\<yyyy-MM-dd>\<recordingId>.mp4` exists and **plays in Windows Media Player**.
+5. Delete it via `DELETE /api/v1/collaboration/recordings/by-collaboration/{collaborationId}` and confirm the file is gone from the share.
 
-✅ Pass = the recording lands in the blob container, plays in WMP, the SAS URL works, and the
-local temp copy is removed. For a **real** account, just set the connection string to your
-storage account's key-based connection string (Portal → Access keys); the container is created
-automatically.
+✅ Pass = the recording lands on the network share, plays in WMP, and delete/purge remove it from the share.
 
 ### E2 — `UseAzureSignalR`
 Needs a real **Azure SignalR Service** (no local emulator). Provision one (Default mode), set
@@ -222,4 +210,4 @@ Needs a TURN server (e.g. coturn). Set `IceServers:TurnServer` (`Urls`/`Username
 - [ ] Monitor console connects and shows a live session (Test B).
 - [ ] Package `start()/stop()` from JS produces a playable file; `collaborationId` honored (Test C).
 - [ ] READI routing works with the flag/override (Test D).
-- [ ] UseAzureBlob: recording uploads to the blob container and SAS playback works (Test E1).
+- [ ] RecordingStorage: recording is written to (and deleted from) the network share (Test E1).

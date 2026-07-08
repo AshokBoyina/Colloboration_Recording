@@ -247,8 +247,8 @@ using (var scope = app.Services.CreateScope())
 // ── Startup: ensure local storage folders exist ───────────────────────────
 try
 {
-    var recordingsPath  = app.Configuration["LocalStorage:RecordingsPath"];
-    var attachmentsPath = app.Configuration["LocalStorage:AttachmentsPath"];
+    var recordingsPath  = app.Configuration["RecordingStorage:RecordingsPath"];
+    var attachmentsPath = app.Configuration["RecordingStorage:AttachmentsPath"];
     if (!string.IsNullOrWhiteSpace(recordingsPath))  Directory.CreateDirectory(recordingsPath);
     if (!string.IsNullOrWhiteSpace(attachmentsPath)) Directory.CreateDirectory(attachmentsPath);
     app.Logger.LogInformation("Local storage folders ready: Recordings={R}", recordingsPath);

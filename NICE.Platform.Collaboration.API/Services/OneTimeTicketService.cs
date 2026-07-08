@@ -30,7 +30,9 @@ public sealed record HandoffPayload(
 ///     OnMessageReceived hook so the WebSocket URL never contains the JWT.
 ///
 /// Tickets are opaque (256-bit random, url-safe, no dots so they can never be
-/// mistaken for a JWT), single-use (removed on redeem), and expire after their TTL.
+/// mistaken for a JWT) and expire after their TTL. Handoff codes are single-use
+/// (removed on redeem); hub tickets are reusable within their short TTL because one
+/// SignalR connect reuses the token for both negotiate and the WebSocket upgrade.
 /// </summary>
 public interface IOneTimeTicketService
 {
@@ -43,7 +45,11 @@ public interface IOneTimeTicketService
     /// <summary>Snapshots the given claims behind an opaque hub ticket.</summary>
     string CreateHubTicket(IEnumerable<Claim> claims, TimeSpan ttl);
 
-    /// <summary>Redeems (and consumes) a hub ticket into an authenticated principal.</summary>
+    /// <summary>
+    /// Validates a hub ticket into an authenticated principal. Reusable within its TTL
+    /// (a single SignalR connect uses the token for both negotiate and the WS upgrade),
+    /// unlike the single-use handoff code.
+    /// </summary>
     bool TryRedeemHubTicket(string ticket, out ClaimsPrincipal? principal);
 }
 
@@ -74,7 +80,15 @@ public sealed class OneTimeTicketService : IOneTimeTicketService
     public bool TryRedeemHubTicket(string ticket, out ClaimsPrincipal? principal)
     {
         principal = null;
-        if (TryTake(ticket, out var obj) && obj is ClaimLite[] lite)
+        if (string.IsNullOrEmpty(ticket)) return false;
+
+        // Reusable within its (short) TTL — NOT single-use. A single SignalR connect
+        // resolves the access token once and reuses it for BOTH the negotiate POST and
+        // the WebSocket upgrade; a single-use ticket would be consumed by negotiate and
+        // then fail the WS handshake. The 2-minute TTL + hub-only scope keep it safe.
+        if (_store.TryGetValue(ticket, out var entry) &&
+            entry.ExpiresAt >= DateTimeOffset.UtcNow &&
+            entry.Payload is ClaimLite[] lite)
         {
             var claims = lite.Select(c => new Claim(c.Type, c.Value));
             // A non-null authenticationType makes IsAuthenticated true so [Authorize] passes.

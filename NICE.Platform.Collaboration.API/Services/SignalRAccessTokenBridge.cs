@@ -46,7 +46,18 @@ public sealed class SignalRAccessTokenBridge(
         }
     }
 
-    public async Task<string?> TryExchangeAsync(string externalToken, string? applicationName, CancellationToken ct)
+    /// <param name="userTypeOverride">
+    /// When set, the issued session token uses this role instead of the role read from the
+    /// external token. The monitor handoff passes "StandaloneMonitor" so the launched console
+    /// joins the monitor group regardless of the READI token's own role.
+    /// </param>
+    /// <param name="requireValidation">
+    /// When true, a failed READI validation returns null (no lenient fallback). Used by the
+    /// monitor handoff so a supervisor session is only issued for a genuinely valid token.
+    /// </param>
+    public async Task<string?> TryExchangeAsync(
+        string externalToken, string? applicationName, CancellationToken ct,
+        string? userTypeOverride = null, bool requireValidation = false)
     {
         try
         {
@@ -56,6 +67,10 @@ public sealed class SignalRAccessTokenBridge(
             if (!result.IsValid)
             {
                 logger.LogWarning("SignalR bridge: READI validation failed: {Error}", result.Error);
+
+                // Strict callers (monitor handoff) must not accept an unvalidated token.
+                if (requireValidation)
+                    return null;
 
                 var fallbackUserId = TryReadClaim(externalToken, JwtRegisteredClaimNames.Sub)
                                      ?? TryReadClaim(externalToken, "sub");
@@ -80,7 +95,8 @@ public sealed class SignalRAccessTokenBridge(
             var app = await ResolveApplicationAsync(applicationName, ct);
             if (app is null) return null;
 
-            var role = TryReadClaim(externalToken, ClaimTypes.Role)
+            var role = userTypeOverride
+                       ?? TryReadClaim(externalToken, ClaimTypes.Role)
                        ?? TryReadClaim(externalToken, "role")
                        ?? "Supervisor";
 
