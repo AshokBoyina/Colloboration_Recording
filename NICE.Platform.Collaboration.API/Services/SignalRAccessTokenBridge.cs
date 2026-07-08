@@ -100,6 +100,14 @@ public sealed class SignalRAccessTokenBridge(
                        ?? TryReadClaim(externalToken, "role")
                        ?? "Supervisor";
 
+            // Users.Email is NOT NULL. A READI token often carries no email claim, so
+            // synthesize a stable placeholder (matches AuthController.UpsertUserAsync) to
+            // avoid a DbUpdateException on insert. Capped to the column's 256-char max.
+            var safeEmail = string.IsNullOrWhiteSpace(result.Email)
+                ? $"no-email+{externalUserId}@local.invalid"
+                : result.Email!;
+            if (safeEmail.Length > 256) safeEmail = safeEmail[..256];
+
             var now = DateTime.UtcNow;
             var user = await db.Users.FirstOrDefaultAsync(u => u.ExternalUserId == externalUserId, ct);
             if (user is null)
@@ -110,7 +118,7 @@ public sealed class SignalRAccessTokenBridge(
                     ExternalUserId = externalUserId,
                     FirstName = result.FirstName ?? "Unknown",
                     LastName = result.LastName ?? "User",
-                    Email = result.Email,
+                    Email = safeEmail,
                     IsActive = true,
                     CreatedAt = now
                 };
